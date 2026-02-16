@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── TRIP DATA ───────────────────────────────────────────────
+// ━━━ TRIP DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const TRIP_DATA = {
   title: "Japan Trip 2026",
   dates: "Feb 20 – Feb 27",
@@ -16,7 +16,7 @@ const TRIP_DATA = {
   ]
 };
 
-// ─── PHRASES ─────────────────────────────────────────────────
+// ━━━ PHRASES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const PHRASES = [
   { en: "Hello", ja: "こんにちは", rom: "Konnichiwa", cat: "basics" },
   { en: "Thank you", ja: "ありがとうございます", rom: "Arigatou gozaimasu", cat: "basics" },
@@ -50,7 +50,7 @@ const PHRASES = [
   { en: "I feel sick", ja: "気分が悪いです", rom: "Kibun ga warui desu", cat: "emergency" },
 ];
 
-// ─── ETIQUETTE ───────────────────────────────────────────────
+// ━━━ ETIQUETTE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const ETIQUETTE = [
   { icon: "🙇", title: "Bowing", text: "Bow when greeting. A slight nod (15°) is fine for casual meetings. Deeper bows show more respect. Don't bow while walking." },
   { icon: "👟", title: "Shoes Off", text: "Remove shoes when entering homes, ryokans, temples, and some restaurants. Look for a genkan (entryway). Slippers are often provided." },
@@ -61,12 +61,12 @@ const ETIQUETTE = [
   { icon: "🗑️", title: "Trash", text: "There are very few public trash cans. Carry a small bag for your trash. Convenience stores have bins you can use." },
   { icon: "🚬", title: "Smoking", text: "No smoking while walking in most areas. Use designated smoking areas. Some cafes/restaurants still allow it." },
   { icon: "📸", title: "Photography", text: "Ask before photographing people, especially geisha in Gion. Many temples prohibit indoor photography. Look for signs." },
-  { icon: "🏪", title: "Konbini Culture", text: "7-Eleven, Lawson, FamilyMart are lifesavers — ATMs, food, tickets, printing, toilet, Wi-Fi. Available 24/7 everywhere." },
+  { icon: "🪪", title: "Konbini Culture", text: "7-Eleven, Lawson, FamilyMart are lifesavers — ATMs, food, tickets, printing, toilet, Wi-Fi. Available 24/7 everywhere." },
   { icon: "🛁", title: "Onsen Rules", text: "Wash thoroughly before entering the bath. No swimwear. Small towel on head, not in water. Tattoos may restrict entry — check first." },
   { icon: "🗣️", title: "Volume", text: "Japanese culture values quiet public spaces. Keep voice low in trains, restaurants, and shrines. No loud phone conversations." },
 ];
 
-// ─── EMERGENCY ───────────────────────────────────────────────
+// ━━━ EMERGENCY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const EMERGENCY = [
   { icon: "🚑", label: "Ambulance / Fire", number: "119", note: "Free from any phone" },
   { icon: "🚓", label: "Police", number: "110", note: "Free from any phone" },
@@ -83,23 +83,23 @@ const TAXI_APPS = [
   { name: "S.RIDE", icon: "🟡", desc: "Tokyo area taxi", url: "https://www.sride.jp/", color: "#FFD600" },
 ];
 
-// ─── ATTRACTIONS DATABASE (Phase 2) ─────────────────────────
+// ━━━ ATTRACTIONS DATABASE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const ATTRACTIONS = {
   kyoto: [
     { name: "Fushimi Inari Taisha", icon: "⛩️", hours: "24 hours", price: "Free", time: "1.5–2h", tip: "Go at dawn for empty torii gates. The full hike takes 2-3 hours.", lat: 34.9671, lng: 135.7727, mustSee: true },
     { name: "Kinkaku-ji (Golden Pavilion)", icon: "🏯", hours: "9:00–17:00", price: "¥500", time: "45 min", tip: "Best photos from the pond. Less crowded in late afternoon.", lat: 35.0394, lng: 135.7292, mustSee: true },
     { name: "Arashiyama Bamboo Grove", icon: "🎋", hours: "24 hours", price: "Free", time: "30 min", tip: "Arrive before 8 AM for photos without crowds. Combine with Tenryu-ji.", lat: 35.0095, lng: 135.6722, mustSee: true },
-    { name: "Nishiki Market", icon: "🏮", hours: "9:00–17:00 (varies)", price: "Free entry", time: "1–2h", tip: "Try the dashi tamago (rolled egg) and mochi. Most stalls close by 5 PM.", lat: 35.0050, lng: 135.7650 },
-    { name: "Kiyomizu-dera", icon: "🏛️", hours: "6:00–18:00", price: "¥400", time: "1h", tip: "The wooden terrace offers stunning views. Night illumination during special events.", lat: 34.9949, lng: 135.7850, mustSee: true },
+    { name: "Nishiki Market", icon: "🍮", hours: "9:00–17:00 (varies)", price: "Free entry", time: "1–2h", tip: "Try the dashi tamago (rolled egg) and mochi. Most stalls close by 5 PM.", lat: 35.0050, lng: 135.7650 },
+    { name: "Kiyomizu-dera", icon: "🛕", hours: "6:00–18:00", price: "¥400", time: "1h", tip: "The wooden terrace offers stunning views. Night illumination during special events.", lat: 34.9949, lng: 135.7850, mustSee: true },
     { name: "Gion District", icon: "🎭", hours: "All day (evening best)", price: "Free", time: "1–2h", tip: "Walk Hanamikoji Street at dusk for geisha sightings. Don't photograph geisha without permission.", lat: 35.0037, lng: 135.7756 },
     { name: "Nijo Castle", icon: "🏰", hours: "8:45–16:00", price: "¥800", time: "1h", tip: "Listen for the 'nightingale floors' that squeak to detect intruders.", lat: 35.0142, lng: 135.7481 },
     { name: "Philosopher's Path", icon: "🌸", hours: "24 hours", price: "Free", time: "1h walk", tip: "Beautiful canal-side walk between Ginkaku-ji and Nanzen-ji. Cherry blossoms in spring.", lat: 35.0272, lng: 135.7942 },
     { name: "Tenryu-ji Temple", icon: "⛩️", hours: "8:30–17:00", price: "¥500", time: "45 min", tip: "UNESCO site. The garden is one of Japan's finest. Adjacent to bamboo grove.", lat: 35.0155, lng: 135.6745 },
     { name: "Nara (Day Trip)", icon: "🦌", hours: "All day", price: "Transit only", time: "Half day", tip: "45 min from Kyoto by JR. Friendly deer roam free. Buy deer crackers (¥200).", lat: 34.6851, lng: 135.8050 },
-    { name: "Tofuku-ji Temple", icon: "🍁", hours: "9:00–16:00", price: "¥500", time: "45 min", tip: "Famous for autumn leaves. The Tsutenkyo bridge view is iconic.", lat: 34.9762, lng: 135.7740 },
+    { name: "Tofuku-ji Temple", icon: "🍂", hours: "9:00–16:00", price: "¥500", time: "45 min", tip: "Famous for autumn leaves. The Tsutenkyo bridge view is iconic.", lat: 34.9762, lng: 135.7740 },
     { name: "Monkey Park Iwatayama", icon: "🐒", hours: "9:00–16:30", price: "¥550", time: "1h", tip: "15-min hike up from Arashiyama. Feed wild monkeys. Amazing city view from top.", lat: 35.0095, lng: 135.6775 },
     { name: "Kyoto Imperial Palace", icon: "👑", hours: "9:00–16:20 (closed Mon)", price: "Free", time: "1h", tip: "No reservation needed since 2016. The park around it is lovely for a stroll.", lat: 35.0254, lng: 135.7621 },
-    { name: "Pontocho Alley", icon: "🏮", hours: "Evening best", price: "Free", time: "30 min–1h", tip: "Narrow atmospheric alley with restaurants. Some have riverside terrace dining in summer.", lat: 35.0066, lng: 135.7710 },
+    { name: "Pontocho Alley", icon: "🍮", hours: "Evening best", price: "Free", time: "30 min–1h", tip: "Narrow atmospheric alley with restaurants. Some have riverside terrace dining in summer.", lat: 35.0066, lng: 135.7710 },
     { name: "Ryoan-ji (Rock Garden)", icon: "🪨", hours: "8:00–17:00", price: "¥500", time: "30 min", tip: "Japan's most famous zen rock garden. Sit and contemplate—can you see all 15 rocks?", lat: 35.0345, lng: 135.7185 },
   ],
   tokyo: [
@@ -121,7 +121,130 @@ const ATTRACTIONS = {
   ]
 };
 
-// ─── SPEECH UTILITY ──────────────────────────────────────────
+// ━━━ PACKING CHECKLIST (Phase 3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const PACKING_DATA = [
+  { cat: "essentials", items: [
+    { id: "p01", name: "Passport", note: "Check expiry — needs 6+ months validity" },
+    { id: "p02", name: "Flight tickets / confirmation", note: "Screenshot or print" },
+    { id: "p03", name: "Hotel confirmations", note: "Print or save offline" },
+    { id: "p04", name: "Travel insurance docs", note: "Save policy # and emergency phone" },
+    { id: "p05", name: "Credit/debit cards", note: "Notify bank of Japan travel dates" },
+    { id: "p06", name: "Cash (JPY)", note: "Get ¥20,000–30,000 before trip or at airport ATM" },
+    { id: "p07", name: "Phone charger + cable", note: "Japan uses Type A plugs (same as US)" },
+    { id: "p08", name: "Portable battery pack", note: "10,000+ mAh recommended" },
+  ]},
+  { cat: "tech", items: [
+    { id: "p09", name: "eSIM / Pocket Wi-Fi", note: "Ubigi, Airalo, or rent at airport" },
+    { id: "p10", name: "Download Google Maps offline", note: "Kyoto + Tokyo regions" },
+    { id: "p11", name: "Install GO Taxi app", note: "Best taxi app in Japan" },
+    { id: "p12", name: "Install SmartEX app", note: "Reserve Shinkansen seats from phone" },
+    { id: "p13", name: "Earbuds / headphones", note: "For trains — no speaker audio!" },
+    { id: "p14", name: "Camera / GoPro", note: "Optional — phone camera is fine" },
+  ]},
+  { cat: "clothing", items: [
+    { id: "p15", name: "Comfortable walking shoes", note: "You'll walk 15,000+ steps/day" },
+    { id: "p16", name: "Slip-on shoes", note: "Easy on/off for temples & restaurants" },
+    { id: "p17", name: "Warm layers", note: "Feb in Japan is cold: 2–10°C (35–50°F)" },
+    { id: "p18", name: "Rain jacket / umbrella", note: "Compact umbrella fits everywhere" },
+    { id: "p19", name: "Warm socks (extra pairs)", note: "Shoes off in temples = cold feet!" },
+    { id: "p20", name: "Scarf / hat / gloves", note: "Wind chill near temples & rivers" },
+  ]},
+  { cat: "japan-specific", items: [
+    { id: "p21", name: "Small trash bag", note: "Very few public trash cans in Japan" },
+    { id: "p22", name: "Hand towel / handkerchief", note: "Many restrooms have no paper towels" },
+    { id: "p23", name: "Coin purse", note: "Japan uses lots of coins (¥1 to ¥500)" },
+    { id: "p24", name: "Ziplock bags", note: "For wet umbrella, leftovers, organization" },
+    { id: "p25", name: "Basic meds", note: "Ibuprofen, Pepto, band-aids, cold medicine" },
+    { id: "p26", name: "Passport photocopy", note: "Keep separate from actual passport" },
+  ]},
+];
+
+// ━━━ DAILY PLANNER (Phase 3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const DAILY_PLANS = [
+  {
+    date: "Feb 21 (Sat)", city: "Kyoto", title: "Temples & Markets Day",
+    stops: [
+      { time: "6:00 AM", name: "Fushimi Inari Taisha", tip: "Beat the crowds — nearly empty at dawn", icon: "⛩️" },
+      { time: "9:00 AM", name: "Breakfast at Nishiki Market", tip: "Dashi tamago, matcha, mochi tasting", icon: "🍮" },
+      { time: "10:30 AM", name: "Kiyomizu-dera", tip: "Walk the Higashiyama streets on the way up", icon: "🛕" },
+      { time: "12:30 PM", name: "Lunch in Gion", tip: "Try a set lunch (teishoku) — most are ¥800-1,200", icon: "🍱" },
+      { time: "2:00 PM", name: "Kinkaku-ji", tip: "Golden Pavilion — less crowded in the afternoon", icon: "🏯" },
+      { time: "4:00 PM", name: "Nijo Castle", tip: "8 min from hotel. Listen for nightingale floors", icon: "🏰" },
+      { time: "6:00 PM", name: "Pontocho Alley dinner", tip: "Narrow atmospheric alley — peek at menus first", icon: "🏮" },
+    ]
+  },
+  {
+    date: "Feb 22 (Sun)", city: "Kyoto → Tokyo", title: "Arashiyama & Transfer",
+    stops: [
+      { time: "7:00 AM", name: "Arashiyama Bamboo Grove", tip: "Go early! Empty before 8 AM", icon: "🎋" },
+      { time: "8:00 AM", name: "Tenryu-ji Temple", tip: "UNESCO garden, right next to bamboo grove", icon: "⛩️" },
+      { time: "9:00 AM", name: "Monkey Park Iwatayama", tip: "15-min hike, feed monkeys at the top", icon: "🐒" },
+      { time: "10:00 AM", name: "Check out of hotel", tip: "Head to Kyoto Station", icon: "🏨" },
+      { time: "11:30 AM", name: "Shinkansen → Tokyo", tip: "Grab an ekiben (station bento) for lunch!", icon: "🚅" },
+      { time: "2:00 PM", name: "Arrive Tokyo, check in", tip: "Drop bags at the b asakusa", icon: "🏨" },
+      { time: "3:00 PM", name: "Senso-ji Temple", tip: "400m from hotel. Nakamise street snacks", icon: "⛩️" },
+      { time: "6:00 PM", name: "Dinner in Asakusa", tip: "Try Hoppy Street for yakitori & beer", icon: "🍻" },
+    ]
+  },
+  {
+    date: "Feb 23 (Mon)", city: "Tokyo", title: "Shibuya & Harajuku",
+    stops: [
+      { time: "9:00 AM", name: "Meiji Shrine", tip: "Forested oasis. Write a wish on an ema plaque", icon: "⛩️" },
+      { time: "10:30 AM", name: "Harajuku / Takeshita Street", tip: "Crepes, fashion, people-watching", icon: "🌈" },
+      { time: "12:00 PM", name: "Lunch on Omotesando", tip: "Trendy restaurants and cafés", icon: "🍜" },
+      { time: "1:30 PM", name: "Shibuya Crossing", tip: "Cross it! Then watch from Starbucks 2F", icon: "🚶" },
+      { time: "2:30 PM", name: "Shibuya Sky", tip: "Book ahead — open-air 360° city views", icon: "🏙️" },
+      { time: "4:30 PM", name: "Shinjuku Gyoen Garden", tip: "Three garden styles, peaceful afternoon", icon: "🌳" },
+      { time: "6:30 PM", name: "Shinjuku dinner & nightlife", tip: "Omoide Yokocho (Memory Lane) for yakitori", icon: "🏮" },
+    ]
+  },
+  {
+    date: "Feb 24 (Tue)", city: "Tokyo", title: "Culture & Food Day",
+    stops: [
+      { time: "6:00 AM", name: "Tsukiji Outer Market", tip: "Best sushi breakfast of your life. Go early!", icon: "🍣" },
+      { time: "9:00 AM", name: "teamLab Borderless", tip: "Book tickets weeks ahead. Allow 2-3 hours", icon: "🎨" },
+      { time: "12:00 PM", name: "Odaiba lunch", tip: "DiverCity mall food court + see the Gundam", icon: "🌉" },
+      { time: "2:30 PM", name: "Imperial Palace East Gardens", tip: "Free entry. Former Edo Castle grounds", icon: "👑" },
+      { time: "4:30 PM", name: "Ueno Park & Museums", tip: "Tokyo National Museum or just stroll the park", icon: "🏛️" },
+      { time: "6:30 PM", name: "Dinner in Ueno/Ameyoko", tip: "Street food market atmosphere", icon: "🍢" },
+    ]
+  },
+  {
+    date: "Feb 25 (Wed)", city: "Tokyo", title: "Akihabara & Old Tokyo",
+    stops: [
+      { time: "9:00 AM", name: "Yanaka District", tip: "Traditional Tokyo — cats, temples, artisans", icon: "🏘️" },
+      { time: "11:00 AM", name: "Akihabara", tip: "Electronics, anime, manga. Try a maid café!", icon: "🎮" },
+      { time: "1:00 PM", name: "Ramen lunch", tip: "So many great shops in this area", icon: "🍜" },
+      { time: "2:30 PM", name: "Tokyo Skytree", tip: "634m tall — book online to skip the queue", icon: "🗼" },
+      { time: "4:30 PM", name: "Asakusa stroll", tip: "Your neighborhood — explore side streets", icon: "🏮" },
+      { time: "6:30 PM", name: "Roppongi Hills / Mori Tower", tip: "Art + night views of Tokyo Tower", icon: "🌃" },
+    ]
+  },
+  {
+    date: "Feb 26 (Thu)", city: "Tokyo", title: "Free Day / Shopping",
+    stops: [
+      { time: "Flexible", name: "Revisit favorites or explore new areas", tip: "This is your buffer day — no pressure!", icon: "🗺️" },
+      { time: "Idea 1", name: "Don Quijote shopping", tip: "Tax-free souvenirs, snacks, electronics", icon: "🛍️" },
+      { time: "Idea 2", name: "Day trip to Kamakura", tip: "Great Buddha, 1h from Tokyo by train", icon: "🧘" },
+      { time: "Idea 3", name: "Ginza district", tip: "Upscale shopping, department store basements for food", icon: "💎" },
+      { time: "Evening", name: "Last night dinner", tip: "Splurge on a special meal — omakase or wagyu?", icon: "🥩" },
+    ]
+  },
+];
+
+// ━━━ WI-FI SPOTS (Phase 3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const WIFI_SPOTS = [
+  { name: "7-Eleven (7SPOT)", icon: "🪪", how: "Free. 60 min sessions. Register in-app or browser.", everywhere: true },
+  { name: "FamilyMart Wi-Fi", icon: "🏪", how: "Free. 20 min × 3 per day. Open browser, accept terms.", everywhere: true },
+  { name: "Lawson Wi-Fi", icon: "🏪", how: "Free. 60 min sessions. Email registration required.", everywhere: true },
+  { name: "Starbucks", icon: "☕", how: "Free. 1 hour, re-login for more. No registration.", everywhere: true },
+  { name: "Japan Connected (app)", icon: "📱", how: "One app connects to 200,000+ free hotspots across Japan.", everywhere: true },
+  { name: "JR Station Wi-Fi", icon: "🚃", how: "Free at major JR stations. Look for JR-EAST_FREE_Wi-Fi.", everywhere: false },
+  { name: "Tokyo Metro Wi-Fi", icon: "🚇", how: "Free at all Tokyo Metro stations. Metro_Free_Wi-Fi.", everywhere: false },
+  { name: "Airport Wi-Fi", icon: "✈️", how: "Free at Narita & Haneda. Unlimited time.", everywhere: false },
+];
+
+// ━━━ SPEECH UTILITY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const speak = (text, lang = "ja-JP") => {
   if ("speechSynthesis" in window) {
     const u = new SpeechSynthesisUtterance(text);
@@ -131,7 +254,7 @@ const speak = (text, lang = "ja-JP") => {
   }
 };
 
-// ─── WEATHER CODES ───────────────────────────────────────────
+// ━━━ WEATHER CODES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const WMO_CODES = {
   0: "☀️ Clear", 1: "🌤️ Mostly Clear", 2: "⛅ Partly Cloudy", 3: "☁️ Overcast",
   45: "🌫️ Fog", 48: "🌫️ Rime Fog", 51: "🌦️ Light Drizzle", 53: "🌦️ Drizzle",
@@ -140,13 +263,42 @@ const WMO_CODES = {
   81: "🌧️ Heavy Showers", 82: "⛈️ Violent Showers", 95: "⛈️ Thunderstorm",
 };
 
-// ─── TAB BAR ─────────────────────────────────────────────────
+// ━━━ LOCAL STORAGE HELPERS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Uses window.storage (Claude artifact persistent storage) with localStorage fallback
+const storage = {
+  async get(key) {
+    try {
+      if (window.storage) {
+        const result = await window.storage.get(key);
+        return result ? JSON.parse(result.value) : null;
+      }
+    } catch (e) {}
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : null;
+    } catch (e) { return null; }
+  },
+  async set(key, value) {
+    try {
+      if (window.storage) {
+        await window.storage.set(key, JSON.stringify(value));
+        return;
+      }
+    } catch (e) {}
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+  }
+};
+
+// ━━━ TAB BAR ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function TabBar({ active, setActive }) {
   const tabs = [
     { id: "trip", icon: "📋", label: "Trip" },
+    { id: "planner", icon: "📅", label: "Plan" },
     { id: "translate", icon: "🗣️", label: "Translate" },
     { id: "explore", icon: "🧭", label: "Explore" },
     { id: "places", icon: "📍", label: "Places" },
+    { id: "pack", icon: "🧳", label: "Pack" },
+    { id: "expense", icon: "💰", label: "Budget" },
     { id: "culture", icon: "🎌", label: "Culture" },
     { id: "sos", icon: "🆘", label: "SOS" },
   ];
@@ -159,16 +311,17 @@ function TabBar({ active, setActive }) {
       paddingBottom: "env(safe-area-inset-bottom, 8px)",
       paddingTop: 6, zIndex: 100,
       backdropFilter: "blur(20px)",
+      overflowX: "auto",
     }}>
       {tabs.map(t => (
         <button key={t.id} onClick={() => setActive(t.id)} style={{
           background: "none", border: "none", color: active === t.id ? "#f7768e" : "#7982a9",
           display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
-          fontSize: 9, fontFamily: "'Noto Sans JP', sans-serif", cursor: "pointer",
+          fontSize: 8, fontFamily: "'Noto Sans JP', sans-serif", cursor: "pointer",
           transition: "all 0.2s", transform: active === t.id ? "scale(1.1)" : "scale(1)",
-          padding: "4px 8px",
+          padding: "4px 5px", minWidth: 0, flexShrink: 0,
         }}>
-          <span style={{ fontSize: 18, filter: active === t.id ? "drop-shadow(0 0 6px #f7768e)" : "none" }}>{t.icon}</span>
+          <span style={{ fontSize: 16, filter: active === t.id ? "drop-shadow(0 0 6px #f7768e)" : "none" }}>{t.icon}</span>
           <span style={{ fontWeight: active === t.id ? 700 : 400 }}>{t.label}</span>
         </button>
       ))}
@@ -176,7 +329,7 @@ function TabBar({ active, setActive }) {
   );
 }
 
-// ─── HEADER WITH WEATHER ─────────────────────────────────────
+// ━━━ HEADER WITH WEATHER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function Header() {
   const [now, setNow] = useState(new Date());
   const [weather, setWeather] = useState(null);
@@ -218,8 +371,6 @@ function Header() {
           <div style={{ fontSize: 11, color: "#7982a9" }}>🇯🇵 {jpDate} JST</div>
         </div>
       </div>
-
-      {/* Weather Strip */}
       {weather?.current && (
         <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 4 }}>
@@ -254,18 +405,15 @@ function Header() {
   );
 }
 
-// ─── CURRENCY CONVERTER (Phase 2) ───────────────────────────
+// ━━━ CURRENCY CONVERTER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function CurrencyConverter() {
   const [amount, setAmount] = useState("1000");
   const [direction, setDirection] = useState("jpy-to-usd");
-  // Fallback rate, would use API in production
-  const rate = 0.0067; // ~¥1 = $0.0067 (approx ¥150 = $1)
+  const rate = 0.0067;
   const inverseRate = 1 / rate;
-
   const converted = direction === "jpy-to-usd"
     ? (parseFloat(amount || 0) * rate).toFixed(2)
     : (parseFloat(amount || 0) * inverseRate).toFixed(0);
-
   const quickAmounts = direction === "jpy-to-usd"
     ? [500, 1000, 3000, 5000, 10000, 20000]
     : [5, 10, 20, 50, 100, 200];
@@ -322,7 +470,7 @@ function CurrencyConverter() {
   );
 }
 
-// ─── TRIP TAB ────────────────────────────────────────────────
+// ━━━ TRIP TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function TripTab() {
   return (
     <div style={{ padding: "12px 16px 100px" }}>
@@ -366,7 +514,79 @@ function TripTab() {
   );
 }
 
-// ─── TRANSLATE TAB (OpenAI API) ──────────────────────────────
+// ━━━ DAILY PLANNER TAB (Phase 3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function PlannerTab() {
+  const [dayIdx, setDayIdx] = useState(0);
+  const day = DAILY_PLANS[dayIdx];
+
+  return (
+    <div style={{ padding: "12px 16px 100px" }}>
+      <h2 style={{ fontSize: 16, color: "#9aa5ce", fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 400, marginBottom: 12 }}>
+        📅 Daily Planner
+      </h2>
+
+      {/* Day selector */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+        {DAILY_PLANS.map((d, i) => (
+          <button key={i} onClick={() => setDayIdx(i)} style={{
+            padding: "6px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+            background: dayIdx === i ? "rgba(247,118,142,0.2)" : "rgba(255,255,255,0.04)",
+            color: dayIdx === i ? "#f7768e" : "#7982a9", fontSize: 11, fontWeight: 600,
+            whiteSpace: "nowrap", flexShrink: 0,
+          }}>
+            {d.date.split(" ")[0]} {d.date.split(" ")[1]}
+          </button>
+        ))}
+      </div>
+
+      {/* Day header */}
+      <div style={{
+        background: "rgba(122,162,247,0.06)", borderRadius: 12, padding: 14, marginBottom: 14,
+        border: "1px solid rgba(122,162,247,0.12)",
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "#c0caf5" }}>{day.title}</div>
+        <div style={{ fontSize: 12, color: "#7aa2f7", marginTop: 2 }}>{day.date} • {day.city}</div>
+      </div>
+
+      {/* Stops */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {day.stops.map((s, i) => (
+          <div key={i} style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 50, flexShrink: 0 }}>
+              <div style={{ fontSize: 10, color: "#7aa2f7", fontFamily: "monospace", fontWeight: 600, whiteSpace: "nowrap" }}>{s.time}</div>
+              {i < day.stops.length - 1 && (
+                <div style={{ width: 1, flexGrow: 1, minHeight: 20, background: "rgba(255,255,255,0.06)", marginTop: 4 }} />
+              )}
+            </div>
+            <div style={{
+              flex: 1, padding: "10px 12px", borderRadius: 10, marginBottom: 4,
+              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 18 }}>{s.icon}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#c0caf5" }}>{s.name}</span>
+              </div>
+              <div style={{
+                fontSize: 11, color: "#e0af68", marginTop: 4, padding: "4px 6px",
+                background: "rgba(224,175,104,0.06)", borderRadius: 4,
+              }}>💡 {s.tip}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        marginTop: 16, padding: 12, borderRadius: 10,
+        background: "rgba(158,206,106,0.06)", border: "1px solid rgba(158,206,106,0.1)",
+        fontSize: 11, color: "#9aa5ce", lineHeight: 1.6,
+      }}>
+        🗒️ These are suggestions — feel free to swap, skip, or linger! The best trips have room to wander.
+      </div>
+    </div>
+  );
+}
+
+// ━━━ TRANSLATE TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function TranslateTab() {
   const [input, setInput] = useState("");
   const [result, setResult] = useState(null);
@@ -398,49 +618,39 @@ function TranslateTab() {
     if (!text.trim()) return;
     setLoading(true);
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      // Try Vercel proxy first (for deployed version)
+      const response = await fetch("/api/translate", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // In production, use a proxy server to hide your API key
-          // "Authorization": "Bearer YOUR_OPENAI_KEY"
-        },
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setResult(data);
+        setLoading(false);
+        return;
+      }
+    } catch (e) { /* proxy not available, try fallbacks */ }
+
+    try {
+      // Fallback: Anthropic API (works inside Claude.ai artifacts)
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
           messages: [{
-            role: "system",
-            content: "You are a Japanese-English translator for a tourist in Japan. Translate the given text. If the input is in English, translate to Japanese. If in Japanese, translate to English. Return ONLY a JSON object with these fields: \"original\", \"translated\", \"romanji\" (romanized Japanese if translating to Japanese), \"context\" (a very brief usage tip, max 10 words). No markdown, no backticks, just raw JSON."
-          }, {
             role: "user",
-            content: text
-          }],
-          temperature: 0.3,
+            content: `You are a Japanese-English translator for a tourist in Japan. Translate the following text. If the input is in English, translate to Japanese. If in Japanese, translate to English. Return ONLY a JSON object with these fields: "original", "translated", "romanji" (romanized Japanese if translating to Japanese), "context" (a very brief usage tip, max 10 words). No markdown, no backticks, just JSON.\n\nText: "${text}"`
+          }]
         })
       });
       const data = await response.json();
-      const raw = data.choices[0].message.content.replace(/```json|```/g, "").trim();
+      const raw = data.content[0].text.replace(/```json|```/g, "").trim();
       setResult(JSON.parse(raw));
-    } catch (err) {
-      // Fallback: try Anthropic API (works inside Claude.ai artifacts)
-      try {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            messages: [{
-              role: "user",
-              content: `You are a Japanese-English translator for a tourist in Japan. Translate the following text. If the input is in English, translate to Japanese. If in Japanese, translate to English. Return ONLY a JSON object with these fields: "original", "translated", "romanji" (romanized Japanese if translating to Japanese), "context" (a very brief usage tip, max 10 words). No markdown, no backticks, just JSON.\n\nText: "${text}"`
-            }]
-          })
-        });
-        const data = await response.json();
-        const raw = data.content[0].text.replace(/```json|```/g, "").trim();
-        setResult(JSON.parse(raw));
-      } catch (err2) {
-        setResult({ original: text, translated: "Translation error – check connection", romanji: "", context: "" });
-      }
+    } catch (err2) {
+      setResult({ original: text, translated: "Translation error — check connection", romanji: "", context: "" });
     }
     setLoading(false);
   };
@@ -455,12 +665,11 @@ function TranslateTab() {
         border: "1px solid rgba(247,118,142,0.12)",
       }}>
         <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 10, fontFamily: "'Noto Sans JP', sans-serif" }}>
-          🎙️ Voice / Text Translation (AI-powered via OpenAI)
+          🎙️ Voice / Text Translation (AI-powered)
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
+            value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && translateText(input)}
             placeholder="Type English or Japanese..."
             style={{
@@ -474,7 +683,6 @@ function TranslateTab() {
             background: listening ? "#f7768e" : "rgba(122,162,247,0.2)",
             color: "#fff", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center",
             animation: listening ? "pulse 1s infinite" : "none",
-            transition: "all 0.2s",
           }}>
             {listening ? "⏹" : "🎤"}
           </button>
@@ -490,33 +698,22 @@ function TranslateTab() {
             <div style={{ fontSize: 22, color: "#fff", fontFamily: "'Noto Serif JP', serif", marginBottom: 4 }}>
               {result.translated}
             </div>
-            {result.romanji && (
-              <div style={{ fontSize: 13, color: "#7aa2f7", marginBottom: 4 }}>{result.romanji}</div>
-            )}
-            {result.context && (
-              <div style={{ fontSize: 11, color: "#e0af68" }}>💡 {result.context}</div>
-            )}
+            {result.romanji && <div style={{ fontSize: 13, color: "#7aa2f7", marginBottom: 4 }}>{result.romanji}</div>}
+            {result.context && <div style={{ fontSize: 11, color: "#e0af68" }}>💡 {result.context}</div>}
             <button onClick={() => speak(result.translated)} style={{
               marginTop: 8, padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer",
               background: "rgba(158,206,106,0.15)", color: "#9ece6a", fontSize: 12,
-            }}>
-              🔊 Listen
-            </button>
+            }}>🔊 Listen</button>
           </div>
         )}
       </div>
-
-      {/* Phrasebook */}
-      <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 8, fontFamily: "'Noto Sans JP', sans-serif" }}>
-        📖 Quick Phrasebook
-      </div>
+      <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 8, fontFamily: "'Noto Sans JP', sans-serif" }}>📖 Quick Phrasebook</div>
       <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
         {cats.map(c => (
           <button key={c} onClick={() => setPhraseFilter(c)} style={{
             padding: "4px 12px", borderRadius: 20, border: "none", cursor: "pointer",
             background: phraseFilter === c ? "rgba(247,118,142,0.2)" : "rgba(255,255,255,0.04)",
             color: phraseFilter === c ? "#f7768e" : "#7982a9", fontSize: 11, textTransform: "capitalize",
-            transition: "all 0.2s",
           }}>{c}</button>
         ))}
       </div>
@@ -526,7 +723,6 @@ function TranslateTab() {
             display: "flex", justifyContent: "space-between", alignItems: "center",
             padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.05)",
             background: "rgba(255,255,255,0.02)", cursor: "pointer", textAlign: "left",
-            transition: "all 0.15s",
           }}>
             <div>
               <div style={{ fontSize: 13, color: "#c0caf5", fontWeight: 500 }}>{p.en}</div>
@@ -541,19 +737,18 @@ function TranslateTab() {
   );
 }
 
-// ─── EXPLORE TAB ─────────────────────────────────────────────
+// ━━━ EXPLORE TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function ExploreTab() {
   const [loc, setLoc] = useState(null);
   const [locErr, setLocErr] = useState(null);
   const [searching, setSearching] = useState(false);
 
   const getLocation = () => {
-    setSearching(true);
-    setLocErr(null);
+    setSearching(true); setLocErr(null);
     if (!navigator.geolocation) { setLocErr("Geolocation not supported"); setSearching(false); return; }
     navigator.geolocation.getCurrentPosition(
       (pos) => { setLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setSearching(false); },
-      () => { setLocErr("Location access denied. Enable in phone settings."); setSearching(false); },
+      () => { setLocErr("Location access denied."); setSearching(false); },
       { enableHighAccuracy: true }
     );
   };
@@ -566,7 +761,7 @@ function ExploreTab() {
   };
 
   const quickSearch = [
-    { icon: "🏪", label: "7-Eleven", query: "7-Eleven near me" },
+    { icon: "🪪", label: "7-Eleven", query: "7-Eleven near me" },
     { icon: "🍜", label: "Ramen", query: "ramen restaurant near me" },
     { icon: "⛩️", label: "Temples", query: "temple shrine near me" },
     { icon: "🍣", label: "Sushi", query: "sushi restaurant near me" },
@@ -580,10 +775,7 @@ function ExploreTab() {
 
   return (
     <div style={{ padding: "12px 16px 100px" }}>
-      {/* Currency Converter - Phase 2 */}
       <CurrencyConverter />
-
-      {/* Location */}
       <div style={{
         background: "rgba(122,162,247,0.06)", borderRadius: 14, padding: 16, marginBottom: 16,
         border: "1px solid rgba(122,162,247,0.12)",
@@ -593,12 +785,20 @@ function ExploreTab() {
           width: "100%", padding: "10px", borderRadius: 10, border: "none", cursor: "pointer",
           background: "rgba(122,162,247,0.15)", color: "#7aa2f7", fontSize: 13, fontWeight: 600,
         }}>
-          {searching ? "Locating..." : loc ? `📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)} – Tap to refresh` : "Enable Location"}
+          {searching ? "Locating..." : loc ? `📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)} — Tap to refresh` : "Enable Location"}
         </button>
         {locErr && <div style={{ fontSize: 11, color: "#f7768e", marginTop: 6 }}>{locErr}</div>}
+        {loc && (
+          <button onClick={() => {
+            const msg = `I'm at: https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+            if (navigator.share) { navigator.share({ title: "My Location", text: msg }); }
+            else { navigator.clipboard.writeText(msg); alert("Location copied!"); }
+          }} style={{
+            width: "100%", padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: "rgba(247,118,142,0.12)", color: "#f7768e", fontSize: 12, fontWeight: 600, marginTop: 8,
+          }}>📤 Share My Location</button>
+        )}
       </div>
-
-      {/* Quick Search Grid */}
       <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 10 }}>🔍 Find Nearby</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 20 }}>
         {quickSearch.map((s, i) => (
@@ -606,22 +806,18 @@ function ExploreTab() {
             padding: "14px 10px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)",
             background: "rgba(255,255,255,0.03)", cursor: "pointer", textAlign: "center",
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-            transition: "all 0.15s",
           }}>
             <span style={{ fontSize: 26 }}>{s.icon}</span>
             <span style={{ fontSize: 12, color: "#c0caf5", fontWeight: 500 }}>{s.label}</span>
           </button>
         ))}
       </div>
-
-      {/* Taxi Apps */}
       <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 10 }}>🚖 Call a Taxi</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
         {TAXI_APPS.map((t, i) => (
           <a key={i} href={t.url} target="_blank" rel="noopener" style={{
             display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)",
-            textDecoration: "none", transition: "all 0.15s",
+            border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.03)", textDecoration: "none",
           }}>
             <span style={{ fontSize: 26 }}>{t.icon}</span>
             <div>
@@ -633,7 +829,24 @@ function ExploreTab() {
         ))}
       </div>
 
-      {/* Transportation */}
+      {/* Wi-Fi Spots (Phase 3) */}
+      <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 10 }}>📶 Free Wi-Fi</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 20 }}>
+        {WIFI_SPOTS.map((w, i) => (
+          <div key={i} style={{
+            padding: "10px 14px", borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }}>{w.icon}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#c0caf5" }}>{w.name}</span>
+              {w.everywhere && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "rgba(158,206,106,0.15)", color: "#9ece6a" }}>EVERYWHERE</span>}
+            </div>
+            <div style={{ fontSize: 11, color: "#9aa5ce", marginTop: 4, paddingLeft: 26 }}>{w.how}</div>
+          </div>
+        ))}
+      </div>
+
       <div style={{ fontSize: 13, color: "#9aa5ce", marginBottom: 10 }}>🚃 Getting Around</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {[
@@ -657,31 +870,28 @@ function ExploreTab() {
           </a>
         ))}
       </div>
-
-      {/* Travel Tips */}
       <div style={{
         marginTop: 16, padding: 14, borderRadius: 12,
         background: "rgba(224,175,104,0.06)", border: "1px solid rgba(224,175,104,0.12)",
       }}>
         <div style={{ fontSize: 13, color: "#e0af68", fontWeight: 600, marginBottom: 8 }}>🗺️ Travel Recommendations</div>
         <div style={{ fontSize: 12, color: "#9aa5ce", lineHeight: 1.7 }}>
-          <strong style={{ color: "#c0caf5" }}>Kyoto:</strong> Get the <strong style={{ color: "#e0af68" }}>1-day bus pass (¥700)</strong> – covers most sightseeing. Buses run every 10-15 min. For Fushimi Inari & Arashiyama use JR lines.
+          <strong style={{ color: "#c0caf5" }}>Kyoto:</strong> Get the <strong style={{ color: "#e0af68" }}>1-day bus pass (¥700)</strong> — covers most sightseeing. Buses run every 10-15 min.
           <br /><br />
-          <strong style={{ color: "#c0caf5" }}>Tokyo:</strong> Get a <strong style={{ color: "#e0af68" }}>Suica/Pasmo IC card</strong> at any station – tap-and-go for all trains, buses, and konbini payments. Consider the <strong style={{ color: "#e0af68" }}>72-hour metro pass (¥1,500)</strong>.
+          <strong style={{ color: "#c0caf5" }}>Tokyo:</strong> Get a <strong style={{ color: "#e0af68" }}>Suica/Pasmo IC card</strong> at any station — tap-and-go for all trains, buses, and konbini payments. Consider the <strong style={{ color: "#e0af68" }}>72-hour metro pass (¥1,500)</strong>.
           <br /><br />
-          <strong style={{ color: "#c0caf5" }}>Shinkansen:</strong> Book at Tokyo/Kyoto station JR ticket office or use <strong style={{ color: "#e0af68" }}>SmartEX app</strong> to reserve seats on your phone. Nozomi is fastest (~2h15m). JR Pass only valid on Hikari/Kodama.
+          <strong style={{ color: "#c0caf5" }}>Shinkansen:</strong> Use <strong style={{ color: "#e0af68" }}>SmartEX app</strong> to reserve seats on your phone. Nozomi is fastest (~2h15m). JR Pass only valid on Hikari/Kodama.
         </div>
       </div>
     </div>
   );
 }
 
-// ─── PLACES TAB (Phase 2 — Attraction Database) ─────────────
+// ━━━ PLACES TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function PlacesTab() {
   const [city, setCity] = useState("kyoto");
   const [expanded, setExpanded] = useState(null);
   const [filter, setFilter] = useState("all");
-
   const attractions = ATTRACTIONS[city];
   const filtered = filter === "must-see" ? attractions.filter(a => a.mustSee) : attractions;
 
@@ -689,20 +899,18 @@ function PlacesTab() {
     <div style={{ padding: "12px 16px 100px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ fontSize: 16, color: "#9aa5ce", fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 400 }}>
-          {city === "kyoto" ? "📍 Kyoto Attractions" : "📍 Tokyo Attractions"}
+          {city === "kyoto" ? "🔍 Kyoto" : "🔍 Tokyo"} Attractions
         </h2>
         <div style={{ display: "flex", gap: 4 }}>
           {["kyoto", "tokyo"].map(c => (
             <button key={c} onClick={() => { setCity(c); setExpanded(null); }} style={{
               padding: "4px 14px", borderRadius: 10, border: "none", cursor: "pointer",
               background: city === c ? "rgba(247,118,142,0.2)" : "rgba(255,255,255,0.05)",
-              color: city === c ? "#f7768e" : "#7982a9", fontSize: 12, fontWeight: 600,
-              textTransform: "capitalize",
+              color: city === c ? "#f7768e" : "#7982a9", fontSize: 12, fontWeight: 600, textTransform: "capitalize",
             }}>{c}</button>
           ))}
         </div>
       </div>
-
       <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
         {["all", "must-see"].map(f => (
           <button key={f} onClick={() => setFilter(f)} style={{
@@ -711,17 +919,13 @@ function PlacesTab() {
             color: filter === f ? "#9ece6a" : "#7982a9", fontSize: 11, textTransform: "capitalize",
           }}>{f === "must-see" ? "⭐ Must-See" : "All"}</button>
         ))}
-        <div style={{ marginLeft: "auto", fontSize: 11, color: "#565f89", alignSelf: "center" }}>
-          {filtered.length} places
-        </div>
+        <div style={{ marginLeft: "auto", fontSize: 11, color: "#565f89", alignSelf: "center" }}>{filtered.length} places</div>
       </div>
-
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {filtered.map((a, i) => (
           <div key={i} style={{
             borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)",
             background: "rgba(255,255,255,0.03)", overflow: "hidden",
-            transition: "all 0.2s",
           }}>
             <button onClick={() => setExpanded(expanded === i ? null : i)} style={{
               width: "100%", padding: "12px 14px", border: "none", cursor: "pointer",
@@ -733,37 +937,23 @@ function PlacesTab() {
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#c0caf5" }}>{a.name}</span>
                   {a.mustSee && <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: "rgba(247,118,142,0.2)", color: "#f7768e" }}>MUST SEE</span>}
                 </div>
-                <div style={{ fontSize: 11, color: "#7982a9", marginTop: 2 }}>
-                  {a.hours} • {a.price} • {a.time}
-                </div>
+                <div style={{ fontSize: 11, color: "#7982a9", marginTop: 2 }}>{a.hours} • {a.price} • {a.time}</div>
               </div>
-              <span style={{ color: "#565f89", fontSize: 14, transition: "transform 0.2s", transform: expanded === i ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+              <span style={{ color: "#565f89", fontSize: 14, transform: expanded === i ? "rotate(180deg)" : "rotate(0)", transition: "transform 0.2s" }}>▼</span>
             </button>
             {expanded === i && (
               <div style={{ padding: "0 14px 14px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
                 <div style={{
                   fontSize: 12, color: "#e0af68", padding: "10px 10px", marginTop: 8,
                   background: "rgba(224,175,104,0.08)", borderRadius: 8, lineHeight: 1.5,
-                }}>
-                  💡 {a.tip}
-                </div>
+                }}>💡 {a.tip}</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                  <a href={`https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lng}`}
-                    target="_blank" rel="noopener"
-                    style={{
-                      flex: 1, padding: "8px", borderRadius: 8, textAlign: "center",
-                      background: "rgba(122,162,247,0.15)", color: "#7aa2f7",
-                      fontSize: 12, textDecoration: "none", fontWeight: 600,
-                    }}>
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lng}`} target="_blank" rel="noopener"
+                    style={{ flex: 1, padding: "8px", borderRadius: 8, textAlign: "center", background: "rgba(122,162,247,0.15)", color: "#7aa2f7", fontSize: 12, textDecoration: "none", fontWeight: 600 }}>
                     📍 Open in Maps
                   </a>
-                  <a href={`https://www.google.com/search?q=${encodeURIComponent(a.name + " " + city + " Japan")}`}
-                    target="_blank" rel="noopener"
-                    style={{
-                      flex: 1, padding: "8px", borderRadius: 8, textAlign: "center",
-                      background: "rgba(158,206,106,0.15)", color: "#9ece6a",
-                      fontSize: 12, textDecoration: "none", fontWeight: 600,
-                    }}>
+                  <a href={`https://www.google.com/search?q=${encodeURIComponent(a.name + " " + city + " Japan")}`} target="_blank" rel="noopener"
+                    style={{ flex: 1, padding: "8px", borderRadius: 8, textAlign: "center", background: "rgba(158,206,106,0.15)", color: "#9ece6a", fontSize: 12, textDecoration: "none", fontWeight: 600 }}>
                     🔍 More Info
                   </a>
                 </div>
@@ -776,7 +966,263 @@ function PlacesTab() {
   );
 }
 
-// ─── CULTURE TAB ─────────────────────────────────────────────
+// ━━━ PACKING CHECKLIST TAB (Phase 3) ━━━━━━━━━━━━━━━━━━━━━━━━━
+function PackTab() {
+  const [checked, setChecked] = useState({});
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    storage.get("japan-packing").then(data => {
+      if (data) setChecked(data);
+      setLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (loaded) storage.set("japan-packing", checked);
+  }, [checked, loaded]);
+
+  const toggle = (id) => setChecked(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const totalItems = PACKING_DATA.reduce((sum, c) => sum + c.items.length, 0);
+  const packedItems = Object.values(checked).filter(Boolean).length;
+  const pct = totalItems > 0 ? Math.round((packedItems / totalItems) * 100) : 0;
+
+  const catLabels = { essentials: "📄 Essentials", tech: "📱 Tech & Apps", clothing: "👕 Clothing (Feb = Cold!)", "japan-specific": "🇯🇵 Japan-Specific" };
+
+  return (
+    <div style={{ padding: "12px 16px 100px" }}>
+      <h2 style={{ fontSize: 16, color: "#9aa5ce", fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 400, marginBottom: 12 }}>
+        🧳 Packing Checklist
+      </h2>
+
+      {/* Progress bar */}
+      <div style={{
+        background: "rgba(122,162,247,0.06)", borderRadius: 12, padding: 14, marginBottom: 16,
+        border: "1px solid rgba(122,162,247,0.12)",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={{ fontSize: 13, color: "#c0caf5" }}>{packedItems} / {totalItems} packed</span>
+          <span style={{ fontSize: 13, color: pct === 100 ? "#9ece6a" : "#7aa2f7", fontWeight: 600 }}>
+            {pct === 100 ? "✅ Ready!" : `${pct}%`}
+          </span>
+        </div>
+        <div style={{ height: 6, borderRadius: 3, background: "rgba(0,0,0,0.3)" }}>
+          <div style={{
+            height: "100%", borderRadius: 3, width: `${pct}%`,
+            background: pct === 100 ? "#9ece6a" : "linear-gradient(90deg, #7aa2f7, #f7768e)",
+            transition: "width 0.3s ease",
+          }} />
+        </div>
+      </div>
+
+      {PACKING_DATA.map((cat, ci) => (
+        <div key={ci} style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#9aa5ce", fontWeight: 600, marginBottom: 8 }}>
+            {catLabels[cat.cat] || cat.cat}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {cat.items.map(item => (
+              <button key={item.id} onClick={() => toggle(item.id)} style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.05)",
+                background: checked[item.id] ? "rgba(158,206,106,0.06)" : "rgba(255,255,255,0.02)",
+                cursor: "pointer", textAlign: "left", width: "100%",
+                opacity: checked[item.id] ? 0.6 : 1, transition: "all 0.2s",
+              }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                  border: checked[item.id] ? "2px solid #9ece6a" : "2px solid rgba(255,255,255,0.15)",
+                  background: checked[item.id] ? "rgba(158,206,106,0.2)" : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, color: "#9ece6a",
+                }}>
+                  {checked[item.id] ? "✓" : ""}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    fontSize: 13, color: "#c0caf5", fontWeight: 500,
+                    textDecoration: checked[item.id] ? "line-through" : "none",
+                  }}>{item.name}</div>
+                  <div style={{ fontSize: 11, color: "#7982a9", marginTop: 1 }}>{item.note}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <button onClick={() => { setChecked({}); }} style={{
+        width: "100%", padding: "10px", borderRadius: 10, border: "1px solid rgba(247,118,142,0.15)",
+        background: "rgba(247,118,142,0.06)", color: "#f7768e", cursor: "pointer", fontSize: 12,
+      }}>
+        🔄 Reset Checklist
+      </button>
+    </div>
+  );
+}
+
+// ━━━ EXPENSE TRACKER TAB (Phase 3) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ExpenseTab() {
+  const [expenses, setExpenses] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newExp, setNewExp] = useState({ name: "", amount: "", cat: "food" });
+
+  useEffect(() => {
+    storage.get("japan-expenses").then(data => {
+      if (data) setExpenses(data);
+      setLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (loaded) storage.set("japan-expenses", expenses);
+  }, [expenses, loaded]);
+
+  const addExpense = () => {
+    if (!newExp.name || !newExp.amount) return;
+    setExpenses(prev => [...prev, {
+      id: Date.now(), name: newExp.name,
+      amount: parseFloat(newExp.amount), cat: newExp.cat,
+      date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    }]);
+    setNewExp({ name: "", amount: "", cat: "food" });
+    setShowAdd(false);
+  };
+
+  const removeExpense = (id) => setExpenses(prev => prev.filter(e => e.id !== id));
+
+  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const catIcons = { food: "🍜", transport: "🚃", shopping: "🛍️", tickets: "🎫", hotel: "🏨", other: "📦" };
+  const catTotals = {};
+  expenses.forEach(e => { catTotals[e.cat] = (catTotals[e.cat] || 0) + e.amount; });
+
+  return (
+    <div style={{ padding: "12px 16px 100px" }}>
+      <h2 style={{ fontSize: 16, color: "#9aa5ce", fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 400, marginBottom: 12 }}>
+        💰 Expense Tracker
+      </h2>
+
+      {/* Total */}
+      <div style={{
+        background: "linear-gradient(135deg, rgba(224,175,104,0.1), rgba(247,118,142,0.08))",
+        borderRadius: 14, padding: 18, marginBottom: 16,
+        border: "1px solid rgba(224,175,104,0.15)",
+        textAlign: "center",
+      }}>
+        <div style={{ fontSize: 11, color: "#7982a9", textTransform: "uppercase", letterSpacing: 2 }}>Total Spent</div>
+        <div style={{ fontSize: 32, fontWeight: 700, color: "#fff", fontFamily: "monospace", marginTop: 4 }}>
+          ¥{total.toLocaleString()}
+        </div>
+        <div style={{ fontSize: 13, color: "#9ece6a", marginTop: 2 }}>
+          ≈ ${(total * 0.0067).toFixed(2)} USD
+        </div>
+      </div>
+
+      {/* Category breakdown */}
+      {Object.keys(catTotals).length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+          {Object.entries(catTotals).map(([cat, amt]) => (
+            <div key={cat} style={{
+              padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)", fontSize: 11, color: "#9aa5ce",
+            }}>
+              {catIcons[cat]} {cat}: ¥{amt.toLocaleString()}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add button */}
+      <button onClick={() => setShowAdd(!showAdd)} style={{
+        width: "100%", padding: "12px", borderRadius: 10, border: "none", cursor: "pointer",
+        background: showAdd ? "rgba(247,118,142,0.15)" : "rgba(158,206,106,0.15)",
+        color: showAdd ? "#f7768e" : "#9ece6a", fontSize: 14, fontWeight: 600, marginBottom: 12,
+      }}>
+        {showAdd ? "✕ Cancel" : "+ Add Expense"}
+      </button>
+
+      {/* Add form */}
+      {showAdd && (
+        <div style={{
+          background: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 14, marginBottom: 16,
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}>
+          <input value={newExp.name} onChange={e => setNewExp(p => ({ ...p, name: e.target.value }))}
+            placeholder="What did you buy?"
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
+              background: "rgba(0,0,0,0.3)", color: "#c0caf5", fontSize: 14, outline: "none", marginBottom: 8,
+            }} />
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#7982a9", fontSize: 14 }}>¥</span>
+              <input value={newExp.amount} onChange={e => setNewExp(p => ({ ...p, amount: e.target.value.replace(/[^0-9]/g, "") }))}
+                placeholder="Amount"
+                style={{
+                  width: "100%", padding: "10px 12px 10px 24px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(0,0,0,0.3)", color: "#c0caf5", fontSize: 14, outline: "none", fontFamily: "monospace",
+                }} />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+            {Object.entries(catIcons).map(([key, icon]) => (
+              <button key={key} onClick={() => setNewExp(p => ({ ...p, cat: key }))} style={{
+                padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer",
+                background: newExp.cat === key ? "rgba(247,118,142,0.2)" : "rgba(255,255,255,0.05)",
+                color: newExp.cat === key ? "#f7768e" : "#7982a9", fontSize: 11,
+              }}>
+                {icon} {key}
+              </button>
+            ))}
+          </div>
+          <button onClick={addExpense} style={{
+            width: "100%", padding: "10px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: "rgba(158,206,106,0.2)", color: "#9ece6a", fontSize: 13, fontWeight: 600,
+          }}>✓ Save</button>
+        </div>
+      )}
+
+      {/* Expense list */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {[...expenses].reverse().map(e => (
+          <div key={e.id} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.05)", background: "rgba(255,255,255,0.02)",
+          }}>
+            <span style={{ fontSize: 20 }}>{catIcons[e.cat] || "📦"}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, color: "#c0caf5", fontWeight: 500 }}>{e.name}</div>
+              <div style={{ fontSize: 10, color: "#7982a9" }}>{e.date} • {e.cat}</div>
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", fontFamily: "monospace" }}>¥{e.amount.toLocaleString()}</div>
+            <button onClick={() => removeExpense(e.id)} style={{
+              width: 24, height: 24, borderRadius: "50%", border: "none", cursor: "pointer",
+              background: "rgba(247,118,142,0.1)", color: "#f7768e", fontSize: 12,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>✕</button>
+          </div>
+        ))}
+      </div>
+
+      {expenses.length === 0 && (
+        <div style={{ textAlign: "center", padding: 30, color: "#565f89", fontSize: 13 }}>
+          No expenses yet. Start tracking your spending!
+        </div>
+      )}
+
+      {expenses.length > 0 && (
+        <button onClick={() => { if (confirm("Clear all expenses?")) setExpenses([]); }} style={{
+          width: "100%", padding: "10px", borderRadius: 10, border: "1px solid rgba(247,118,142,0.12)",
+          background: "rgba(247,118,142,0.04)", color: "#f7768e", cursor: "pointer", fontSize: 12, marginTop: 12,
+        }}>🗑️ Clear All Expenses</button>
+      )}
+    </div>
+  );
+}
+
+// ━━━ CULTURE TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function CultureTab() {
   return (
     <div style={{ padding: "12px 16px 100px" }}>
@@ -807,7 +1253,7 @@ function CultureTab() {
   );
 }
 
-// ─── SOS TAB ─────────────────────────────────────────────────
+// ━━━ SOS TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function SOSTab() {
   return (
     <div style={{ padding: "12px 16px 100px" }}>
@@ -883,19 +1329,15 @@ function SOSTab() {
   );
 }
 
-// ─── MAIN APP ────────────────────────────────────────────────
+// ━━━ MAIN APP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export default function JapanTravelAssistant() {
   const [tab, setTab] = useState("trip");
 
   return (
     <div style={{
-      minHeight: "100vh",
-      background: "#1a1a2e",
-      color: "#c0caf5",
+      minHeight: "100vh", background: "#1a1a2e", color: "#c0caf5",
       fontFamily: "'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif",
-      maxWidth: 480,
-      margin: "0 auto",
-      position: "relative",
+      maxWidth: 480, margin: "0 auto", position: "relative",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Noto+Serif+JP:wght@400;600&display=swap');
@@ -914,9 +1356,12 @@ export default function JapanTravelAssistant() {
       <Header />
 
       {tab === "trip" && <TripTab />}
+      {tab === "planner" && <PlannerTab />}
       {tab === "translate" && <TranslateTab />}
       {tab === "explore" && <ExploreTab />}
       {tab === "places" && <PlacesTab />}
+      {tab === "pack" && <PackTab />}
+      {tab === "expense" && <ExpenseTab />}
       {tab === "culture" && <CultureTab />}
       {tab === "sos" && <SOSTab />}
 
