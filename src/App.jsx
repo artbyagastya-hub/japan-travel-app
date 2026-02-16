@@ -1,257 +1,241 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ━━━ FLIGHT DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const FLIGHTS = {
-  outbound: {
-    flight: "TG 682", airline: "Thai Airways", aircraft: "Boeing 777-300ER",
-    date: "Feb 19 (Thu)", route: "Bangkok (BKK) → Tokyo Haneda (HND)",
-    depart: "22:45", arrive: "06:55 +1", arriveDate: "Feb 20 (Fri)",
-    terminal: { depart: "Suvarnabhumi", arrive: "Haneda T3" },
-    duration: "6h 10m", distance: "4,589 km", codeshare: "NH5598 / LY8433", onTime: "70%", avgDelay: "20 min",
-  },
-  return: {
-    flight: "TG 683", airline: "Thai Airways", aircraft: "Boeing 777-300ER",
-    date: "Feb 27 (Fri)", route: "Tokyo Haneda (HND) → Bangkok (BKK)",
-    depart: "10:35", arrive: "15:40", arriveDate: "Feb 27 (Fri)",
-    terminal: { depart: "Haneda T3", arrive: "Suvarnabhumi T1" },
-    duration: "7h 05m", distance: "4,589 km", codeshare: "NH5599 / LY8434", onTime: "84%", avgDelay: "17 min",
+// ━━━ CONFIG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// For self-hosted: set your OpenAI key in env, use a proxy. 
+// For Claude.ai artifact: calls go through Anthropic's endpoint.
+const OPENAI_MODEL = "gpt-4o-mini";
+const OPENAI_VISION_MODEL = "gpt-4o";
+
+async function callOpenAI(messages, { model = OPENAI_MODEL, max_tokens = 1000 } = {}) {
+  // Try OpenAI proxy first (self-hosted), fall back to direct (needs key in env)
+  const endpoints = ["/api/translate", "https://api.openai.com/v1/chat/completions"];
+  for (const url of endpoints) {
+    try {
+      const isProxy = url.startsWith("/");
+      const headers = { "Content-Type": "application/json" };
+      if (!isProxy && typeof window !== "undefined" && window.__OPENAI_KEY) {
+        headers["Authorization"] = `Bearer ${window.__OPENAI_KEY}`;
+      }
+      const body = isProxy
+        ? JSON.stringify({ text: messages[messages.length - 1].content })
+        : JSON.stringify({ model, max_tokens, messages, temperature: 0.3 });
+      const res = await fetch(url, { method: "POST", headers, body });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (isProxy) return JSON.stringify(data);
+      return data.choices?.[0]?.message?.content || "";
+    } catch { continue; }
   }
+  // Fallback: use Anthropic API (works inside Claude.ai artifacts)
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens, messages: [{ role: "user", content: messages.map(m => `${m.role}: ${m.content}`).join("\n") }] })
+    });
+    const data = await res.json();
+    return data.content?.map(c => c.text || "").join("") || "";
+  } catch { return null; }
+}
+
+async function callVision(base64, prompt) {
+  // Try OpenAI Vision
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(window.__OPENAI_KEY ? { Authorization: `Bearer ${window.__OPENAI_KEY}` } : {}) },
+      body: JSON.stringify({
+        model: OPENAI_VISION_MODEL, max_tokens: 1000,
+        messages: [{ role: "user", content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
+          { type: "text", text: prompt }
+        ]}]
+      })
+    });
+    if (res.ok) { const d = await res.json(); return d.choices?.[0]?.message?.content || ""; }
+  } catch {}
+  // Fallback: Anthropic Vision
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000,
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+          { type: "text", text: prompt }
+        ]}]
+      })
+    });
+    const d = await res.json();
+    return d.content?.map(c => c.text || "").join("") || "";
+  } catch { return "Could not process image. Check connection."; }
+}
+
+// ━━━ DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const FLIGHTS = {
+  outbound: { flight:"TG 682",airline:"Thai Airways",aircraft:"Boeing 777-300ER",date:"Feb 19 (Thu)",route:"Bangkok (BKK) → Tokyo Haneda (HND)",depart:"22:45",arrive:"06:55 +1",arriveDate:"Feb 20 (Fri)",terminal:{depart:"Suvarnabhumi",arrive:"Haneda T3"},duration:"6h 10m",distance:"4,589 km",codeshare:"NH5598 / LY8433",onTime:"70%",avgDelay:"20 min" },
+  return: { flight:"TG 683",airline:"Thai Airways",aircraft:"Boeing 777-300ER",date:"Feb 27 (Fri)",route:"Tokyo Haneda (HND) → Bangkok (BKK)",depart:"10:35",arrive:"15:40",arriveDate:"Feb 27 (Fri)",terminal:{depart:"Haneda T3",arrive:"Suvarnabhumi T1"},duration:"7h 05m",distance:"4,589 km",codeshare:"NH5599 / LY8434",onTime:"84%",avgDelay:"17 min" }
 };
 
 const HOTELS = [
-  { name: "The OneFive Kyoto Shijo", nameJa: "ザ・ワンファイブ京都四条", dates: "Feb 20–22",
-    address: "〒600-8413 京都府京都市下京区四条通堀川東入ル柏屋町1番地",
-    addressEn: "1 Kashiwaya-cho, Shijo-dori Horikawa, Shimogyo-ku, Kyoto",
-    phone: "+81-75-284-1150", checkin: "3:00 PM", checkout: "10:00 AM",
-    lat: 35.0016, lng: 135.7508, nearStation: "Omiya / Shijo Omiya Stn (3 min)" },
-  { name: "the b asakusa", nameJa: "ザ・ビー浅草", dates: "Feb 22–27",
-    address: "〒111-0035 東京都台東区西浅草3-16-12",
-    addressEn: "3-16-12 Nishi Asakusa, Taito-ku, Tokyo",
-    phone: "+81-3-5828-3300", checkin: "3:00 PM", checkout: "11:00 AM",
-    lat: 35.7118, lng: 139.7918, nearStation: "Tsukuba Express Asakusa (1 min)" }
+  { name:"The OneFive Kyoto Shijo",nameJa:"ザ・ワンファイブ京都四条",dates:"Feb 20–22",address:"〒600-8413 京都府京都市下京区四条通堀川東入ル柏屋町1番地",addressEn:"1 Kashiwaya-cho, Shijo-dori Horikawa, Shimogyo-ku, Kyoto",phone:"+81-75-284-1150",checkin:"3:00 PM",checkout:"10:00 AM",lat:35.0016,lng:135.7508,nearStation:"Omiya / Shijo Omiya Stn (3 min)" },
+  { name:"the b asakusa",nameJa:"ザ・ビー浅草",dates:"Feb 22–27",address:"〒111-0035 東京都台東区西浅草3-16-12",addressEn:"3-16-12 Nishi Asakusa, Taito-ku, Tokyo",phone:"+81-3-5828-3300",checkin:"3:00 PM",checkout:"11:00 AM",lat:35.7118,lng:139.7918,nearStation:"Tsukuba Express Asakusa (1 min)" }
 ];
 
-const TRIP_DATA = {
-  segments: [
-    { id:0, type:"travel", icon:"✈️", title:"Depart Bangkok → Tokyo", date:"Feb 19 (Thu)", time:"22:45 BKK → 06:55+1 HND", detail:"TG 682 • Thai Airways • Boeing 777-300ER • Haneda T3", note:"Night flight. Arrive Feb 20 morning. Buy Suica/Pasmo at Haneda." },
-    { id:1, type:"travel", icon:"🚅", title:"Shinkansen → Kyoto", date:"Feb 20 (Fri)", time:"~2h 15m", detail:"Tokyo Stn → Kyoto Stn (Nozomi)", note:"SmartEX app to reserve. ¥13,320 one-way." },
-    { id:2, type:"hotel", icon:"🏨", title:"The OneFive Kyoto Shijo", date:"Feb 20–22", time:"In 3PM / Out 10AM", detail:"Shimogyo-ku, Shijo-dori Horikawa • 3 min to Omiya Stn", note:"7-Eleven on ground floor! Nijo Castle 8 min." },
-    { id:3, type:"explore", icon:"⛩️", title:"Explore Kyoto", date:"Feb 21–22", time:"Full days", detail:"Fushimi Inari, Kinkaku-ji, Arashiyama, Nishiki Market, Gion", note:"Buy Kyoto 1-day bus pass (¥700)" },
-    { id:4, type:"travel", icon:"🚅", title:"Shinkansen → Tokyo", date:"Feb 22 (Sun)", time:"After check-out", detail:"Kyoto Stn → Tokyo Stn", note:"Same route back. ~2h 15m" },
-    { id:5, type:"hotel", icon:"🏨", title:"the b asakusa", date:"Feb 22–27", time:"In 3PM / Out 11AM", detail:"Nishi Asakusa 3-16-12 • 1 min from Tsukuba Express", note:"400m from Sensoji. 7-Eleven across the street." },
-    { id:6, type:"explore", icon:"🗼", title:"Explore Tokyo", date:"Feb 23–26", time:"Full days", detail:"Shibuya, Shinjuku, Akihabara, Harajuku, Tsukiji, Skytree", note:"Suica works everywhere. 72-hour metro pass ¥1,500" },
-    { id:7, type:"travel", icon:"✈️", title:"Flight Home → Bangkok", date:"Feb 27 (Fri)", time:"10:35 HND → 15:40 BKK", detail:"TG 683 • Thai Airways • Haneda T3", note:"Check out 11AM. Allow 3+ hours before flight." },
-  ]
-};
+const TRIP_DATA = { segments: [
+  { id:0,type:"travel",icon:"✈️",title:"Depart Bangkok → Tokyo",date:"Feb 19 (Thu)",time:"22:45 BKK → 06:55+1 HND",detail:"TG 682 • Thai Airways • Boeing 777-300ER • Haneda T3",note:"Night flight. Arrive Feb 20 morning. Buy Suica/Pasmo at Haneda." },
+  { id:1,type:"travel",icon:"🚅",title:"Shinkansen → Kyoto",date:"Feb 20 (Fri)",time:"~2h 15m",detail:"Tokyo Stn → Kyoto Stn (Nozomi)",note:"SmartEX app to reserve. ¥13,320 one-way." },
+  { id:2,type:"hotel",icon:"🏨",title:"The OneFive Kyoto Shijo",date:"Feb 20–22",time:"In 3PM / Out 10AM",detail:"Shimogyo-ku, Shijo-dori Horikawa • 3 min to Omiya Stn",note:"7-Eleven on ground floor! Nijo Castle 8 min." },
+  { id:3,type:"explore",icon:"⛩️",title:"Explore Kyoto",date:"Feb 21–22",time:"Full days",detail:"Fushimi Inari, Kinkaku-ji, Arashiyama, Nishiki Market, Gion",note:"Buy Kyoto 1-day bus pass (¥700)" },
+  { id:4,type:"travel",icon:"🚅",title:"Shinkansen → Tokyo",date:"Feb 22 (Sun)",time:"After check-out",detail:"Kyoto Stn → Tokyo Stn",note:"Same route back. ~2h 15m" },
+  { id:5,type:"hotel",icon:"🏨",title:"the b asakusa",date:"Feb 22–27",time:"In 3PM / Out 11AM",detail:"Nishi Asakusa 3-16-12 • 1 min from Tsukuba Express",note:"400m from Sensoji. 7-Eleven across the street." },
+  { id:6,type:"explore",icon:"🗼",title:"Explore Tokyo",date:"Feb 23–26",time:"Full days",detail:"Shibuya, Shinjuku, Akihabara, Harajuku, Tsukiji, Skytree",note:"Suica works everywhere. 72-hour metro pass ¥1,500" },
+  { id:7,type:"travel",icon:"✈️",title:"Flight Home → Bangkok",date:"Feb 27 (Fri)",time:"10:35 HND → 15:40 BKK",detail:"TG 683 • Thai Airways • Haneda T3",note:"Check out 11AM. Allow 3+ hours before flight." },
+]};
 
 const PHRASES = [
-  { en:"Hello", ja:"こんにちは", rom:"Konnichiwa", cat:"basics" },
-  { en:"Thank you", ja:"ありがとうございます", rom:"Arigatou gozaimasu", cat:"basics" },
-  { en:"Excuse me", ja:"すみません", rom:"Sumimasen", cat:"basics" },
-  { en:"Sorry", ja:"ごめんなさい", rom:"Gomen nasai", cat:"basics" },
-  { en:"Yes / No", ja:"はい / いいえ", rom:"Hai / Iie", cat:"basics" },
-  { en:"I don't understand", ja:"わかりません", rom:"Wakarimasen", cat:"basics" },
-  { en:"Do you speak English?", ja:"英語を話せますか？", rom:"Eigo o hanasemasu ka?", cat:"basics" },
-  { en:"Please", ja:"お願いします", rom:"Onegaishimasu", cat:"basics" },
-  { en:"Good morning", ja:"おはようございます", rom:"Ohayou gozaimasu", cat:"basics" },
-  { en:"Goodbye", ja:"さようなら", rom:"Sayounara", cat:"basics" },
-  { en:"How much?", ja:"いくらですか？", rom:"Ikura desu ka?", cat:"shopping" },
-  { en:"Too expensive", ja:"高すぎます", rom:"Takasugimasu", cat:"shopping" },
-  { en:"I'll take this", ja:"これをください", rom:"Kore o kudasai", cat:"shopping" },
-  { en:"Where is the toilet?", ja:"トイレはどこですか？", rom:"Toire wa doko desu ka?", cat:"navigate" },
-  { en:"Where is the station?", ja:"駅はどこですか？", rom:"Eki wa doko desu ka?", cat:"navigate" },
-  { en:"Please take me to…", ja:"…まで お願いします", rom:"...made onegaishimasu", cat:"navigate" },
-  { en:"I'm lost", ja:"迷いました", rom:"Mayoimashita", cat:"navigate" },
-  { en:"Where is the trash can?", ja:"ゴミ箱はどこですか？", rom:"Gomibako wa doko desu ka?", cat:"navigate" },
-  { en:"Menu, please", ja:"メニューをください", rom:"Menyuu o kudasai", cat:"food" },
-  { en:"Water, please", ja:"お水をください", rom:"Omizu o kudasai", cat:"food" },
-  { en:"The bill, please", ja:"お会計お願いします", rom:"Okaikei onegaishimasu", cat:"food" },
-  { en:"Delicious!", ja:"おいしい！", rom:"Oishii!", cat:"food" },
-  { en:"No meat please", ja:"肉なしでお願いします", rom:"Niku nashi de onegaishimasu", cat:"food" },
-  { en:"I have an allergy", ja:"アレルギーがあります", rom:"Arerugii ga arimasu", cat:"food" },
-  { en:"Cheers!", ja:"乾杯！", rom:"Kanpai!", cat:"food" },
-  { en:"Help!", ja:"助けて！", rom:"Tasukete!", cat:"emergency" },
-  { en:"Call an ambulance", ja:"救急車を呼んでください", rom:"Kyuukyuusha o yonde kudasai", cat:"emergency" },
-  { en:"I need a doctor", ja:"医者が必要です", rom:"Isha ga hitsuyou desu", cat:"emergency" },
-  { en:"I feel sick", ja:"気分が悪いです", rom:"Kibun ga warui desu", cat:"emergency" },
+  {en:"Hello",ja:"こんにちは",rom:"Konnichiwa",cat:"basics"},{en:"Thank you",ja:"ありがとうございます",rom:"Arigatou gozaimasu",cat:"basics"},
+  {en:"Excuse me",ja:"すみません",rom:"Sumimasen",cat:"basics"},{en:"Sorry",ja:"ごめんなさい",rom:"Gomen nasai",cat:"basics"},
+  {en:"Yes / No",ja:"はい / いいえ",rom:"Hai / Iie",cat:"basics"},{en:"I don't understand",ja:"わかりません",rom:"Wakarimasen",cat:"basics"},
+  {en:"Do you speak English?",ja:"英語を話せますか？",rom:"Eigo o hanasemasu ka?",cat:"basics"},{en:"Please",ja:"お願いします",rom:"Onegaishimasu",cat:"basics"},
+  {en:"Good morning",ja:"おはようございます",rom:"Ohayou gozaimasu",cat:"basics"},{en:"Goodbye",ja:"さようなら",rom:"Sayounara",cat:"basics"},
+  {en:"How much?",ja:"いくらですか？",rom:"Ikura desu ka?",cat:"shopping"},{en:"Too expensive",ja:"高すぎます",rom:"Takasugimasu",cat:"shopping"},
+  {en:"I'll take this",ja:"これをください",rom:"Kore o kudasai",cat:"shopping"},{en:"Where is the toilet?",ja:"トイレはどこですか？",rom:"Toire wa doko desu ka?",cat:"navigate"},
+  {en:"Where is the station?",ja:"駅はどこですか？",rom:"Eki wa doko desu ka?",cat:"navigate"},{en:"Please take me to…",ja:"…まで お願いします",rom:"...made onegaishimasu",cat:"navigate"},
+  {en:"I'm lost",ja:"迷いました",rom:"Mayoimashita",cat:"navigate"},{en:"Where is the trash can?",ja:"ゴミ箱はどこですか？",rom:"Gomibako wa doko desu ka?",cat:"navigate"},
+  {en:"Menu, please",ja:"メニューをください",rom:"Menyuu o kudasai",cat:"food"},{en:"Water, please",ja:"お水をください",rom:"Omizu o kudasai",cat:"food"},
+  {en:"The bill, please",ja:"お会計お願いします",rom:"Okaikei onegaishimasu",cat:"food"},{en:"Delicious!",ja:"おいしい！",rom:"Oishii!",cat:"food"},
+  {en:"No meat please",ja:"肉なしでお願いします",rom:"Niku nashi de onegaishimasu",cat:"food"},{en:"I have an allergy",ja:"アレルギーがあります",rom:"Arerugii ga arimasu",cat:"food"},
+  {en:"Cheers!",ja:"乾杯！",rom:"Kanpai!",cat:"food"},{en:"Help!",ja:"助けて！",rom:"Tasukete!",cat:"emergency"},
+  {en:"Call an ambulance",ja:"救急車を呼んでください",rom:"Kyuukyuusha o yonde kudasai",cat:"emergency"},{en:"I need a doctor",ja:"医者が必要です",rom:"Isha ga hitsuyou desu",cat:"emergency"},
+  {en:"I feel sick",ja:"気分が悪いです",rom:"Kibun ga warui desu",cat:"emergency"},
 ];
 
 const ETIQUETTE = [
-  { icon:"🙇", title:"Bowing", text:"Slight nod (15°) for casual meetings. Deeper bows show more respect." },
-  { icon:"👟", title:"Shoes Off", text:"Remove shoes at homes, ryokans, temples, some restaurants. Look for genkan." },
-  { icon:"🍜", title:"Slurping OK", text:"Slurping noodles is polite — shows you enjoy the food." },
-  { icon:"🥢", title:"Chopsticks", text:"Never stick upright in rice. Don't pass food chopstick-to-chopstick." },
-  { icon:"💴", title:"Cash & No Tips", text:"Very cash-based. NEVER tip — it's rude. Use the payment tray." },
-  { icon:"🚃", title:"Train Manners", text:"No calls on trains. Keep voice low. Don't eat on local trains." },
-  { icon:"🗑️", title:"Trash", text:"Very few public bins. Carry a bag. Konbini & stations have bins." },
-  { icon:"📸", title:"Photography", text:"Ask before photographing people. Many temples ban indoor photos." },
-  { icon:"🪪", title:"Konbini", text:"7-Eleven, Lawson, FamilyMart: ATMs, food, tickets, Wi-Fi. 24/7." },
-  { icon:"🛁", title:"Onsen", text:"Wash before entering. No swimwear. Tattoos may restrict entry." },
-  { icon:"🗣️", title:"Volume", text:"Keep voice low in trains, restaurants, and shrines." },
+  {icon:"🙇",title:"Bowing",text:"Slight nod (15°) for casual meetings. Deeper bows show more respect."},
+  {icon:"👟",title:"Shoes Off",text:"Remove shoes at homes, ryokans, temples, some restaurants. Look for genkan."},
+  {icon:"🍜",title:"Slurping OK",text:"Slurping noodles is polite — shows you enjoy the food."},
+  {icon:"🥢",title:"Chopsticks",text:"Never stick upright in rice. Don't pass food chopstick-to-chopstick."},
+  {icon:"💴",title:"Cash & No Tips",text:"Very cash-based. NEVER tip — it's rude. Use the payment tray."},
+  {icon:"🚃",title:"Train Manners",text:"No calls on trains. Keep voice low. Don't eat on local trains."},
+  {icon:"🗑️",title:"Trash",text:"Very few public bins. Carry a bag. Konbini & stations have bins."},
+  {icon:"📸",title:"Photography",text:"Ask before photographing people. Many temples ban indoor photos."},
+  {icon:"🪪",title:"Konbini",text:"7-Eleven, Lawson, FamilyMart: ATMs, food, tickets, Wi-Fi. 24/7."},
+  {icon:"🛁",title:"Onsen",text:"Wash before entering. No swimwear. Tattoos may restrict entry."},
+  {icon:"🗣️",title:"Volume",text:"Keep voice low in trains, restaurants, and shrines."},
 ];
 
 const EMERGENCY = [
-  { icon:"🚑", label:"Ambulance/Fire", number:"119", note:"Free from any phone" },
-  { icon:"🚔", label:"Police", number:"110", note:"Free from any phone" },
-  { icon:"🌐", label:"Japan Helpline (24h EN)", number:"0570-064-211", note:"Multilingual" },
-  { icon:"🥏", label:"AMDA Medical (EN)", number:"03-6233-9266", note:"Doctor referrals" },
-  { icon:"📱", label:"NHK World Disaster", number:null, note:"Earthquake/typhoon alerts", url:"https://www3.nhk.or.jp/nhkworld/en/news/" },
+  {icon:"🚑",label:"Ambulance/Fire",number:"119",note:"Free from any phone"},
+  {icon:"🚓",label:"Police",number:"110",note:"Free from any phone"},
+  {icon:"🌐",label:"Japan Helpline (24h EN)",number:"0570-064-211",note:"Multilingual"},
+  {icon:"🏥",label:"AMDA Medical (EN)",number:"03-6233-9266",note:"Doctor referrals"},
+  {icon:"📱",label:"NHK World Disaster",number:null,note:"Earthquake/typhoon alerts",url:"https://www3.nhk.or.jp/nhkworld/en/news/"},
 ];
 
 const NIGHTLIFE = {
-  whiskey: [
-    { name:"Bar Benfiddich", area:"Shinjuku", desc:"World's 50 Best Bars. Mad-genius owner grows ingredients. Rare vintage bottles.", price:"¥¥¥", hours:"6PM–2AM", tip:"9F of nondescript building. No menu — tell them what you like.", lat:35.6937, lng:139.6957 },
-    { name:"Zoetrope", area:"Nishi-Shinjuku", desc:"300+ Japanese whiskies. Film-buff owner screens movies while you sip.", price:"¥¥", hours:"5PM–12AM (closed Sun)", tip:"Small and intimate. Go early — stop entry 30 min before close.", lat:35.6930, lng:139.6940 },
-    { name:"Bar Hermit West", area:"Nishi-Shinjuku", desc:"Choose 'Scotch' or 'Bourbon' at the door. Ridiculous rare selection.", price:"¥¥¥", hours:"6PM–2AM", tip:"Barrel-end signs on wall. Sushi next door after.", lat:35.6932, lng:139.6935 },
-    { name:"Aloha Whisky", area:"Ikebukuro", desc:"Bar of the Year winner. Hawaiian owner David is incredibly warm.", price:"¥¥", hours:"3PM–12AM", tip:"Open afternoons — rare for whisky bars. Great daytime tasting.", lat:35.7312, lng:139.7098 },
-    { name:"Star Bar Ginza", area:"Ginza", desc:"Legendary upmarket bar. Hand-carved 'ninja ice'. Impeccable service.", price:"¥¥¥¥", hours:"5PM–11PM (closed Sun)", tip:"Dress smart. No photos. Bespoke drinks to your taste.", lat:35.6713, lng:139.7651 },
-    { name:"Whisky Salon", area:"Shinjuku", desc:"Run by 1 of only 13 'Masters of Whisky' worldwide. Near Golden Gai.", price:"¥¥¥", hours:"6PM–1AM", tip:"Try the Whiskolaschka — whisky paired with yuzu & truffle salt.", lat:35.6940, lng:139.7030 },
+  whiskey:[
+    {name:"Bar Benfiddich",area:"Shinjuku",desc:"World's 50 Best Bars. Mad-genius owner grows ingredients.",price:"¥¥¥",hours:"6PM–2AM",tip:"9F nondescript building. No menu — tell them what you like.",lat:35.6937,lng:139.6957},
+    {name:"Zoetrope",area:"Nishi-Shinjuku",desc:"300+ Japanese whiskies. Film-buff owner screens movies.",price:"¥¥",hours:"5PM–12AM (closed Sun)",tip:"Small & intimate. Go early.",lat:35.6930,lng:139.6940},
+    {name:"Star Bar Ginza",area:"Ginza",desc:"Legendary upmarket bar. Hand-carved ice. Impeccable service.",price:"¥¥¥¥",hours:"5PM–11PM (closed Sun)",tip:"Dress smart. No photos.",lat:35.6713,lng:139.7651},
   ],
-  vinyl: [
-    { name:"Grandfather's", area:"Shibuya", desc:"40-year OG listening bar. Yacht rock to Bruno Mars. Perfect playlists.", price:"¥¥", hours:"7PM–2AM", tip:"¥700 Guinness on tap. Cozy and friendly. Can get smoky.", lat:35.6595, lng:139.6990 },
-    { name:"JBS", area:"Shibuya", desc:"Unbelievable collection. Plays full sides of albums. Serious audiophile.", price:"¥¥", hours:"7PM–3AM", tip:"Owner can be prickly but music is incredible. Just listen.", lat:35.6590, lng:139.6985 },
-    { name:"Ginza Music Bar", area:"Ginza", desc:"3,000 vinyls, Tannoy speakers, plush blue seating. By DJ Osawa.", price:"¥¥¥", hours:"6PM–1AM", tip:"Make a reservation — gets busy. Expert cocktails.", lat:35.6710, lng:139.7645 },
-    { name:"Cave Shibuya", area:"Shibuya", desc:"Basement bar. 3,000 records. Soul, funk, disco classics.", price:"¥¥", hours:"6PM–2AM", tip:"Fancy cocktails and spinny bar stools on Meiji Street.", lat:35.6600, lng:139.7020 },
-    { name:"Little Soul Cafe", area:"Shimokitazawa", desc:"15,000+ vinyls since 1999. Soul, funk, jazz, dance.", price:"¥", hours:"9PM–3AM", tip:"Narrow corridor space. Intimate. True music lover's paradise.", lat:35.6613, lng:139.6683 },
-    { name:"Meikyoku Kissa Lion", area:"Shibuya", desc:"Founded 1926. Oldest music cafe. Towering custom wood speakers.", price:"¥", hours:"11AM–10PM", tip:"No talking 3PM–7PM (concert hours). Request records outside that.", lat:35.6580, lng:139.6960 },
+  vinyl:[
+    {name:"Grandfather's",area:"Shibuya",desc:"40-year OG listening bar. Perfect playlists.",price:"¥¥",hours:"7PM–2AM",tip:"¥700 Guinness on tap. Cozy.",lat:35.6595,lng:139.6990},
+    {name:"JBS",area:"Shibuya",desc:"Incredible collection. Plays full sides of albums.",price:"¥¥",hours:"7PM–3AM",tip:"Just listen. Serious audiophile spot.",lat:35.6590,lng:139.6985},
+    {name:"Meikyoku Kissa Lion",area:"Shibuya",desc:"Founded 1926. Oldest music cafe. Towering speakers.",price:"¥",hours:"11AM–10PM",tip:"No talking 3PM–7PM (concert hours).",lat:35.6580,lng:139.6960},
   ],
-  entertainment: [
-    { name:"Golden Gai", area:"Shinjuku", desc:"50-100 tiny bars in narrow alleys, each seats 5-6. Unique themes.", price:"¥–¥¥¥", hours:"8PM–late", tip:"Many charge ¥500-1000 cover. Look for 'tourist-friendly' signs.", lat:35.6940, lng:139.7035 },
-    { name:"Omoide Yokocho", area:"Shinjuku", desc:"Atmospheric alley of tiny yakitori stalls near Shinjuku Station.", price:"¥", hours:"5PM–12AM", tip:"Get yakitori and a beer. Smoky, cramped, perfect.", lat:35.6937, lng:139.6980 },
-    { name:"Hoppy Street", area:"Asakusa", desc:"Outdoor drinking street near your hotel! Yakitori & lively vibes.", price:"¥", hours:"3PM–11PM", tip:"400m from the b asakusa. Order Hoppy — local specialty.", lat:35.7130, lng:139.7940 },
-    { name:"Nonbei Yokocho", area:"Shibuya", desc:"40+ tiny bars with distinct personality. Less touristy than Golden Gai.", price:"¥–¥¥", hours:"6PM–late", tip:"More local feel. Wander and peek inside — most are welcoming.", lat:35.6594, lng:139.7005 },
-    { name:"Kabukicho Tower", area:"Shinjuku", desc:"New entertainment complex: bars, restaurants, cinema, rooftop.", price:"¥¥", hours:"10AM–11PM", tip:"Namco arcade floors + trendy restaurants. New Shinjuku landmark.", lat:35.6955, lng:139.7010 },
+  entertainment:[
+    {name:"Golden Gai",area:"Shinjuku",desc:"50-100 tiny bars in narrow alleys, each seats 5-6.",price:"¥–¥¥¥",hours:"8PM–late",tip:"Many charge ¥500-1000 cover.",lat:35.6940,lng:139.7035},
+    {name:"Omoide Yokocho",area:"Shinjuku",desc:"Atmospheric alley of tiny yakitori stalls.",price:"¥",hours:"5PM–12AM",tip:"Smoky, cramped, perfect.",lat:35.6937,lng:139.6980},
+    {name:"Hoppy Street",area:"Asakusa",desc:"Outdoor drinking street near your hotel!",price:"¥",hours:"3PM–11PM",tip:"400m from the b asakusa. Order Hoppy.",lat:35.7130,lng:139.7940},
   ]
 };
 
 const SHOPPING = [
-  { name:"Don Quijote (Donki)", icon:"🏪", area:"Everywhere", desc:"Tax-free souvenirs, snacks, electronics. Open 24h.", tip:"Passport for tax-free on ¥5,000+.", cat:"general" },
-  { name:"Nakamise Street", icon:"🎎", area:"Asakusa", desc:"Traditional souvenirs, snacks, fans. 400m from hotel!", tip:"Compare prices on side streets.", cat:"souvenirs" },
-  { name:"Omotesando", icon:"👔", area:"Harajuku", desc:"Tokyo's Champs-Élysées. Luxury brands, designer boutiques.", tip:"Side streets (Ura-Harajuku) for indie Japanese designers.", cat:"fashion" },
-  { name:"Takeshita Street", icon:"🌈", area:"Harajuku", desc:"Youth fashion, quirky accessories, crepes.", tip:"Weekday mornings to avoid crowds. Try Marion Crêpes.", cat:"fashion" },
-  { name:"Akihabara Electric Town", icon:"🎮", area:"Akihabara", desc:"Electronics, anime, manga, retro games. Multi-floor shops.", tip:"Yodobashi Camera for electronics. Mandarake for rare manga.", cat:"electronics" },
-  { name:"Nishiki Market", icon:"🍡", area:"Kyoto", desc:"400m covered market, 100+ food stalls. Kyoto's kitchen.", tip:"Dashi tamago, mochi, matcha everything. Closes 5 PM.", cat:"food" },
-  { name:"Tokyu Hands / Loft", icon:"🎨", area:"Shibuya", desc:"Japanese stationery, crafts, gadgets, unique gifts.", tip:"Stationery floor is incredible — pens, washi tape, notebooks.", cat:"general" },
-  { name:"Depachika (Basements)", icon:"🍱", area:"Everywhere", desc:"Dept store food floors. Stunning bento & sweets.", tip:"Isetan Shinjuku is best. 30 min before close for discounts.", cat:"food" },
-  { name:"Disk Union", icon:"🎵", area:"Shinjuku", desc:"Japan's best used records. Genre-specific stores. Jazz, rock.", tip:"Shinjuku branch excels in jazz. Competitive prices.", cat:"entertainment" },
-  { name:"Tower Records Shibuya", icon:"💿", area:"Shibuya", desc:"9-floor music store. 6th floor has amazing vinyl.", tip:"Japan-exclusive vinyl pressings. Great for music lovers.", cat:"entertainment" },
-  { name:"Uniqlo Ginza", icon:"👕", area:"Ginza", desc:"12-floor flagship. Japan-exclusive items.", tip:"UT floor has Japan-only graphic tees. Cheaper than abroad.", cat:"fashion" },
-];
-
-const TRASH_TIPS = [
-  { icon:"🪪", name:"Convenience Stores", desc:"7-Eleven, Lawson, FamilyMart all have bins. Best option!", reliable:true },
-  { icon:"🚃", name:"Train Stations", desc:"Most JR/Metro stations have bins on platforms.", reliable:true },
-  { icon:"🏪", name:"Vending Machines", desc:"Recycling bins always next to vending machines.", reliable:true },
-  { icon:"🏬", name:"Shopping Malls", desc:"Restroom areas and food courts have bins.", reliable:true },
-  { icon:"🍔", name:"Fast Food / Cafés", desc:"McDonald's, Starbucks etc. have bins inside.", reliable:true },
-  { icon:"🎒", name:"Carry a Bag!", desc:"Pro tip: Always carry a small plastic bag for trash!", reliable:true },
+  {name:"Don Quijote (Donki)",icon:"🪩",area:"Everywhere",desc:"Tax-free souvenirs, snacks, electronics. Open 24h.",tip:"Passport for tax-free on ¥5,000+.",cat:"general"},
+  {name:"Nakamise Street",icon:"🎎",area:"Asakusa",desc:"Traditional souvenirs, snacks. 400m from hotel!",tip:"Compare prices on side streets.",cat:"souvenirs"},
+  {name:"Akihabara Electric Town",icon:"🎮",area:"Akihabara",desc:"Electronics, anime, manga, retro games.",tip:"Yodobashi Camera for electronics.",cat:"electronics"},
+  {name:"Nishiki Market",icon:"🍡",area:"Kyoto",desc:"400m covered market, 100+ food stalls.",tip:"Dashi tamago, mochi, matcha. Closes 5 PM.",cat:"food"},
+  {name:"Disk Union",icon:"🎵",area:"Shinjuku",desc:"Japan's best used records. Genre-specific stores.",tip:"Shinjuku branch excels in jazz.",cat:"entertainment"},
+  {name:"Tower Records Shibuya",icon:"💿",area:"Shibuya",desc:"9-floor music store. Japan-exclusive vinyl.",tip:"Great for music lovers.",cat:"entertainment"},
 ];
 
 const ATTRACTIONS = {
-  kyoto: [
-    { name:"Fushimi Inari", icon:"⛩️", hours:"24h", price:"Free", time:"1.5–2h", tip:"Go at dawn. Full hike 2-3 hours.", lat:34.9671, lng:135.7727, mustSee:true },
-    { name:"Kinkaku-ji", icon:"🏯", hours:"9–17", price:"¥500", time:"45m", tip:"Best photos from pond. Less crowded PM.", lat:35.0394, lng:135.7292, mustSee:true },
-    { name:"Arashiyama Bamboo", icon:"🎋", hours:"24h", price:"Free", time:"30m", tip:"Before 8 AM for no crowds.", lat:35.0095, lng:135.6722, mustSee:true },
-    { name:"Nishiki Market", icon:"🍡", hours:"9–17", price:"Free", time:"1–2h", tip:"Dashi tamago & mochi. Closes 5 PM.", lat:35.0050, lng:135.7650 },
-    { name:"Kiyomizu-dera", icon:"🛕", hours:"6–18", price:"¥400", time:"1h", tip:"Wooden terrace = stunning views.", lat:34.9949, lng:135.7850, mustSee:true },
-    { name:"Gion District", icon:"🎭", hours:"Evening", price:"Free", time:"1–2h", tip:"Hanamikoji at dusk for geisha.", lat:35.0037, lng:135.7756 },
-    { name:"Nijo Castle", icon:"🏰", hours:"8:45–16", price:"¥800", time:"1h", tip:"Nightingale floors squeak!", lat:35.0142, lng:135.7481 },
-    { name:"Nara Day Trip", icon:"🦌", hours:"All day", price:"Transit", time:"Half day", tip:"45 min by JR. Deer crackers ¥200.", lat:34.6851, lng:135.8050 },
+  kyoto:[
+    {name:"Fushimi Inari",icon:"⛩️",hours:"24h",price:"Free",time:"1.5–2h",tip:"Go at dawn. Full hike 2-3 hours.",lat:34.9671,lng:135.7727,mustSee:true},
+    {name:"Kinkaku-ji",icon:"🏯",hours:"9–17",price:"¥500",time:"45m",tip:"Best photos from pond.",lat:35.0394,lng:135.7292,mustSee:true},
+    {name:"Arashiyama Bamboo",icon:"🎋",hours:"24h",price:"Free",time:"30m",tip:"Before 8 AM for no crowds.",lat:35.0095,lng:135.6722,mustSee:true},
+    {name:"Nishiki Market",icon:"🍡",hours:"9–17",price:"Free",time:"1–2h",tip:"Dashi tamago & mochi.",lat:35.0050,lng:135.7650},
+    {name:"Kiyomizu-dera",icon:"🛕",hours:"6–18",price:"¥400",time:"1h",tip:"Wooden terrace = stunning views.",lat:34.9949,lng:135.7850,mustSee:true},
+    {name:"Gion District",icon:"🎭",hours:"Evening",price:"Free",time:"1–2h",tip:"Hanamikoji at dusk for geisha.",lat:35.0037,lng:135.7756},
   ],
-  tokyo: [
-    { name:"Senso-ji", icon:"⛩️", hours:"6–17", price:"Free", time:"1h", tip:"400m from hotel! Nakamise snacks.", lat:35.7148, lng:139.7967, mustSee:true },
-    { name:"Shibuya Crossing", icon:"🚶", hours:"24h", price:"Free", time:"30m", tip:"Starbucks 2F or Shibuya Sky view.", lat:35.6595, lng:139.7004, mustSee:true },
-    { name:"Meiji Shrine", icon:"⛩️", hours:"Dawn–Dusk", price:"Free", time:"1h", tip:"Forested shrine. Write wish on ema.", lat:35.6764, lng:139.6993, mustSee:true },
-    { name:"Tokyo Skytree", icon:"🗼", hours:"10–21", price:"¥2,100+", time:"1–2h", tip:"634m tall. Book online.", lat:35.7101, lng:139.8107, mustSee:true },
-    { name:"Akihabara", icon:"🎮", hours:"10–21", price:"Free", time:"2–4h", tip:"Electronics, anime. Try maid café.", lat:35.7023, lng:139.7745 },
-    { name:"Harajuku", icon:"🌈", hours:"10–20", price:"Free", time:"1–2h", tip:"Marion Crêpes. Omotesando nearby.", lat:35.6704, lng:139.7028 },
-    { name:"Tsukiji Market", icon:"🍣", hours:"5–14", price:"Free", time:"1–2h", tip:"Best sushi breakfast ever. Go early!", lat:35.6654, lng:139.7707, mustSee:true },
-    { name:"teamLab Borderless", icon:"🎨", hours:"10–19", price:"¥3,800", time:"2–3h", tip:"Book weeks ahead. Mind-blowing.", lat:35.6257, lng:139.7838 },
-    { name:"Shibuya Sky", icon:"🏙️", hours:"10–22:30", price:"¥2,000", time:"1h", tip:"Open-air deck. Best at sunset.", lat:35.6584, lng:139.7022 },
+  tokyo:[
+    {name:"Senso-ji",icon:"⛩️",hours:"6–17",price:"Free",time:"1h",tip:"400m from hotel!",lat:35.7148,lng:139.7967,mustSee:true},
+    {name:"Shibuya Crossing",icon:"🚶",hours:"24h",price:"Free",time:"30m",tip:"Starbucks 2F or Shibuya Sky.",lat:35.6595,lng:139.7004,mustSee:true},
+    {name:"Meiji Shrine",icon:"⛩️",hours:"Dawn–Dusk",price:"Free",time:"1h",tip:"Write wish on ema.",lat:35.6764,lng:139.6993,mustSee:true},
+    {name:"Tokyo Skytree",icon:"🗼",hours:"10–21",price:"¥2,100+",time:"1–2h",tip:"634m tall. Book online.",lat:35.7101,lng:139.8107,mustSee:true},
+    {name:"Akihabara",icon:"🎮",hours:"10–21",price:"Free",time:"2–4h",tip:"Electronics, anime, maid café.",lat:35.7023,lng:139.7745},
+    {name:"Tsukiji Market",icon:"🍣",hours:"5–14",price:"Free",time:"1–2h",tip:"Best sushi breakfast ever!",lat:35.6654,lng:139.7707,mustSee:true},
+    {name:"teamLab Borderless",icon:"🎨",hours:"10–19",price:"¥3,800",time:"2–3h",tip:"Book weeks ahead.",lat:35.6257,lng:139.7838},
   ]
 };
 
-const PACKING_DATA = [
-  { cat:"essentials", items:[
-    {id:"p01",name:"Passport",note:"6+ months validity"},{id:"p02",name:"Flight tickets",note:"TG 682/683"},
-    {id:"p03",name:"Hotel confirmations",note:"Print/save offline"},{id:"p04",name:"Travel insurance",note:"Save policy #"},
-    {id:"p05",name:"Cards (notify bank)",note:"Japan travel dates"},{id:"p06",name:"Cash (JPY)",note:"¥20,000+ at airport"},
-    {id:"p07",name:"Charger + cable",note:"Type A plugs (=US)"},{id:"p08",name:"Battery pack",note:"10,000+ mAh"},
-  ]},
-  { cat:"tech", items:[
-    {id:"p09",name:"eSIM / Pocket Wi-Fi",note:"Ubigi, Airalo"},{id:"p10",name:"Offline Google Maps",note:"Kyoto + Tokyo"},
-    {id:"p11",name:"GO Taxi app",note:"Best taxi in Japan"},{id:"p12",name:"SmartEX app",note:"Reserve Shinkansen"},
-    {id:"p13",name:"Earbuds",note:"For trains — no speakers!"},
-  ]},
-  { cat:"clothing", items:[
-    {id:"p15",name:"Walking shoes",note:"15,000+ steps/day"},{id:"p16",name:"Slip-on shoes",note:"Temples & restaurants"},
-    {id:"p17",name:"Warm layers",note:"Feb: 2–10°C"},{id:"p18",name:"Umbrella",note:"Compact"},
-    {id:"p19",name:"Warm socks",note:"Cold feet in temples!"},{id:"p20",name:"Scarf/hat/gloves",note:"Wind chill"},
-  ]},
-  { cat:"japan-specific", items:[
-    {id:"p21",name:"Small trash bag",note:"No public bins!"},{id:"p22",name:"Hand towel",note:"No paper towels in restrooms"},
-    {id:"p23",name:"Coin purse",note:"Lots of coins"},{id:"p24",name:"Basic meds",note:"Ibuprofen, Pepto, band-aids"},
-  ]},
-];
-
 const DAILY_PLANS = [
-  { date:"Feb 21 (Sat)", city:"Kyoto", title:"Temples & Markets", stops:[
-    {time:"6:00",name:"Fushimi Inari",tip:"Empty at dawn",icon:"⛩️"},{time:"9:00",name:"Nishiki Market breakfast",tip:"Dashi tamago, matcha, mochi",icon:"🍡"},
-    {time:"10:30",name:"Kiyomizu-dera",tip:"Walk Higashiyama streets up",icon:"🛕"},{time:"12:30",name:"Gion lunch",tip:"Teishoku set ¥800-1,200",icon:"🍱"},
-    {time:"14:00",name:"Kinkaku-ji",tip:"Less crowded afternoon",icon:"🏯"},{time:"16:00",name:"Nijo Castle",tip:"Nightingale floors!",icon:"🏰"},
-    {time:"18:00",name:"Pontocho dinner",tip:"Atmospheric alley",icon:"🍶"},
+  {date:"Feb 21 (Sat)",city:"Kyoto",title:"Temples & Markets",stops:[
+    {time:"6:00",name:"Fushimi Inari",tip:"Empty at dawn",icon:"⛩️"},{time:"9:00",name:"Nishiki Market",tip:"Dashi tamago, matcha",icon:"🍡"},
+    {time:"10:30",name:"Kiyomizu-dera",tip:"Walk Higashiyama up",icon:"🛕"},{time:"12:30",name:"Gion lunch",tip:"Teishoku ¥800-1,200",icon:"🍱"},
+    {time:"14:00",name:"Kinkaku-ji",tip:"Less crowded PM",icon:"🏯"},{time:"18:00",name:"Pontocho dinner",tip:"Atmospheric alley",icon:"🍶"},
   ]},
-  { date:"Feb 22 (Sun)", city:"Kyoto→Tokyo", title:"Arashiyama & Transfer", stops:[
-    {time:"7:00",name:"Bamboo Grove",tip:"Empty before 8 AM",icon:"🎋"},{time:"8:00",name:"Tenryu-ji",tip:"UNESCO garden",icon:"⛩️"},
-    {time:"9:00",name:"Monkey Park",tip:"15-min hike, feed monkeys",icon:"🐒"},{time:"10:00",name:"Check out",tip:"→ Kyoto Station",icon:"🏨"},
-    {time:"11:30",name:"Shinkansen",tip:"Grab ekiben bento!",icon:"🚅"},{time:"14:00",name:"Check in Tokyo",tip:"the b asakusa",icon:"🏨"},
-    {time:"15:00",name:"Senso-ji",tip:"400m from hotel",icon:"⛩️"},{time:"18:00",name:"Hoppy Street",tip:"Yakitori & beer near hotel",icon:"🍻"},
+  {date:"Feb 22 (Sun)",city:"Kyoto→Tokyo",title:"Arashiyama & Transfer",stops:[
+    {time:"7:00",name:"Bamboo Grove",tip:"Empty before 8 AM",icon:"🎋"},{time:"10:00",name:"Check out → Kyoto Stn",tip:"Grab ekiben!",icon:"🚅"},
+    {time:"14:00",name:"Check in Tokyo",tip:"the b asakusa",icon:"🏨"},{time:"15:00",name:"Senso-ji",tip:"400m from hotel",icon:"⛩️"},
+    {time:"18:00",name:"Hoppy Street",tip:"Yakitori & beer",icon:"🍻"},
   ]},
-  { date:"Feb 23 (Mon)", city:"Tokyo", title:"Shibuya & Harajuku", stops:[
+  {date:"Feb 23 (Mon)",city:"Tokyo",title:"Shibuya & Harajuku",stops:[
     {time:"9:00",name:"Meiji Shrine",tip:"Write wish on ema",icon:"⛩️"},{time:"10:30",name:"Takeshita Street",tip:"Crepes & fashion",icon:"🌈"},
-    {time:"12:00",name:"Omotesando lunch",tip:"Trendy cafés",icon:"🍜"},{time:"13:30",name:"Shibuya Crossing",tip:"Then Starbucks 2F",icon:"🚶"},
-    {time:"14:30",name:"Shibuya Sky",tip:"Book ahead for 360° views",icon:"🏙️"},{time:"16:30",name:"Shinjuku Gyoen",tip:"Three garden styles",icon:"🌳"},
-    {time:"19:00",name:"Golden Gai",tip:"Bar hopping in tiny alleys",icon:"🍶"},
+    {time:"13:30",name:"Shibuya Crossing",tip:"Then Starbucks 2F",icon:"🚶"},{time:"14:30",name:"Shibuya Sky",tip:"360° views",icon:"🏙️"},
+    {time:"19:00",name:"Golden Gai",tip:"Bar hopping",icon:"🍶"},
   ]},
-  { date:"Feb 24 (Tue)", city:"Tokyo", title:"Culture & Whiskey", stops:[
-    {time:"6:00",name:"Tsukiji Market",tip:"Best sushi breakfast ever",icon:"🍣"},{time:"9:00",name:"teamLab Borderless",tip:"Book ahead, 2-3h",icon:"🎨"},
-    {time:"12:00",name:"Odaiba",tip:"Gundam + food court",icon:"🌉"},{time:"14:30",name:"Imperial Palace Gardens",tip:"Free entry, Edo Castle",icon:"👑"},
-    {time:"16:30",name:"Ueno Park",tip:"National Museum or stroll",icon:"🏛️"},{time:"19:00",name:"Whiskey bar night",tip:"Zoetrope or Bar Benfiddich",icon:"🥃"},
+  {date:"Feb 24 (Tue)",city:"Tokyo",title:"Culture & Whiskey",stops:[
+    {time:"6:00",name:"Tsukiji Market",tip:"Best sushi breakfast",icon:"🍣"},{time:"9:00",name:"teamLab Borderless",tip:"2-3h",icon:"🎨"},
+    {time:"14:30",name:"Imperial Palace",tip:"Free, Edo Castle",icon:"👑"},{time:"19:00",name:"Whiskey bars",tip:"Zoetrope or Benfiddich",icon:"🥃"},
   ]},
-  { date:"Feb 25 (Wed)", city:"Tokyo", title:"Akihabara & Vinyl", stops:[
-    {time:"9:00",name:"Yanaka District",tip:"Old Tokyo: cats, temples",icon:"🏘️"},{time:"11:00",name:"Akihabara",tip:"Electronics, anime, maid café",icon:"🎮"},
-    {time:"13:00",name:"Ramen lunch",tip:"Great shops in the area",icon:"🍜"},{time:"14:30",name:"Tokyo Skytree",tip:"Book online, skip queue",icon:"🗼"},
-    {time:"17:00",name:"Disk Union",tip:"Best used records. Jazz!",icon:"🎵"},{time:"19:00",name:"Vinyl listening bar",tip:"Grandfather's in Shibuya",icon:"🎶"},
+  {date:"Feb 25 (Wed)",city:"Tokyo",title:"Akihabara & Vinyl",stops:[
+    {time:"11:00",name:"Akihabara",tip:"Electronics, anime",icon:"🎮"},{time:"14:30",name:"Tokyo Skytree",tip:"Book online",icon:"🗼"},
+    {time:"17:00",name:"Disk Union",tip:"Best used records",icon:"🎵"},{time:"19:00",name:"Vinyl bar night",tip:"Grandfather's",icon:"🎶"},
   ]},
-  { date:"Feb 26 (Thu)", city:"Tokyo", title:"Shopping & Last Night", stops:[
-    {time:"Flex",name:"Revisit or explore",tip:"Buffer day — no pressure!",icon:"🗺️"},
-    {time:"Idea",name:"Don Quijote + Ginza Six",tip:"Tax-free souvenirs, depachika",icon:"🛍️"},
-    {time:"Idea",name:"Day trip Kamakura",tip:"Great Buddha, 1h by train",icon:"🧘"},
-    {time:"Eve",name:"Last night splurge",tip:"Omakase/wagyu + Star Bar Ginza",icon:"🥩"},
+  {date:"Feb 26 (Thu)",city:"Tokyo",title:"Shopping & Last Night",stops:[
+    {time:"Flex",name:"Revisit or explore",tip:"Buffer day!",icon:"🗺️"},{time:"Idea",name:"Don Quijote + Ginza",tip:"Tax-free souvenirs",icon:"🛍️"},
+    {time:"Eve",name:"Last night splurge",tip:"Omakase/wagyu + Star Bar",icon:"🥩"},
   ]},
 ];
 
-const WMO_CODES = {0:"☀️ Clear",1:"🌤️ Clear",2:"⛅ Cloudy",3:"☁️ Overcast",45:"🌫️ Fog",51:"🌦️ Drizzle",61:"🌧️ Rain",63:"🌧️ Rain",71:"🌨️ Snow",80:"🌧️ Showers",95:"⛈️ Storm"};
+const PACKING_DATA = [
+  {cat:"essentials",items:[{id:"p01",name:"Passport",note:"6+ months validity"},{id:"p02",name:"Flight tickets",note:"TG 682/683"},{id:"p03",name:"Hotel confirmations",note:"Print/save offline"},{id:"p04",name:"Travel insurance",note:"Save policy #"},{id:"p05",name:"Cards (notify bank)",note:"Japan travel dates"},{id:"p06",name:"Cash (JPY)",note:"¥20,000+ at airport"},{id:"p07",name:"Charger + cable",note:"Type A plugs (=US)"},{id:"p08",name:"Battery pack",note:"10,000+ mAh"}]},
+  {cat:"tech",items:[{id:"p09",name:"eSIM / Pocket Wi-Fi",note:"Ubigi, Airalo"},{id:"p10",name:"Offline Google Maps",note:"Kyoto + Tokyo"},{id:"p11",name:"GO Taxi app",note:"Best taxi in Japan"},{id:"p12",name:"SmartEX app",note:"Reserve Shinkansen"},{id:"p13",name:"Earbuds",note:"No speakers on trains!"}]},
+  {cat:"clothing",items:[{id:"p15",name:"Walking shoes",note:"15,000+ steps/day"},{id:"p16",name:"Slip-on shoes",note:"Temples & restaurants"},{id:"p17",name:"Warm layers",note:"Feb: 2–10°C"},{id:"p18",name:"Umbrella",note:"Compact"},{id:"p19",name:"Warm socks",note:"Cold in temples!"}]},
+  {cat:"japan-specific",items:[{id:"p21",name:"Small trash bag",note:"No public bins!"},{id:"p22",name:"Hand towel",note:"No paper towels"},{id:"p23",name:"Coin purse",note:"Lots of coins"},{id:"p24",name:"Basic meds",note:"Ibuprofen, band-aids"}]},
+];
 
-const speak = (text, lang="ja-JP") => { if("speechSynthesis" in window){const u=new SpeechSynthesisUtterance(text);u.lang=lang;u.rate=0.85;speechSynthesis.speak(u);} };
+const WMO_CODES={0:"☀️ Clear",1:"🌤️ Clear",2:"⛅ Cloudy",3:"☁️ Overcast",45:"🌫️ Fog",51:"🌦️ Drizzle",61:"🌧️ Rain",63:"🌧️ Rain",71:"🌨️ Snow",80:"🌧️ Showers",95:"⛈️ Storm"};
+const speak=(text,lang="ja-JP")=>{if("speechSynthesis"in window){const u=new SpeechSynthesisUtterance(text);u.lang=lang;u.rate=0.85;speechSynthesis.speak(u);}};
 
-const storage = {
-  async get(k){try{if(window.storage){const r=await window.storage.get(k);return r?JSON.parse(r.value):null;}}catch(e){}try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}},
-  async set(k,v){try{if(window.storage){await window.storage.set(k,JSON.stringify(v));return;}}catch(e){}try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+const storage={
+  async get(k){try{if(window.storage){const r=await window.storage.get(k);return r?JSON.parse(r.value):null;}}catch{}try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}},
+  async set(k,v){try{if(window.storage){await window.storage.set(k,JSON.stringify(v));return;}}catch{}try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
 };
 
-// ━━━ COMPONENTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ COMPONENTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function TabBar({active,setActive}){
   const tabs=[{id:"trip",icon:"📋",l:"Trip"},{id:"planner",icon:"📅",l:"Plan"},{id:"translate",icon:"🗣️",l:"Talk"},
-    {id:"explore",icon:"🧭",l:"Explore"},{id:"nightlife",icon:"🌙",l:"Night"},{id:"places",icon:"📍",l:"Places"},
-    {id:"pack",icon:"🧳",l:"Pack"},{id:"expense",icon:"💰",l:"¥"},{id:"chat",icon:"🤖",l:"AI"},{id:"sos",icon:"🆘",l:"SOS"}];
+    {id:"camera",icon:"📷",l:"Lens"},{id:"explore",icon:"🧭",l:"Explore"},{id:"nightlife",icon:"🌙",l:"Night"},
+    {id:"places",icon:"📍",l:"Places"},{id:"pack",icon:"🧳",l:"Pack"},{id:"expense",icon:"💰",l:"¥"},
+    {id:"chat",icon:"🤖",l:"AI"},{id:"sos",icon:"🆘",l:"SOS"}];
   return(<div style={{position:"fixed",bottom:0,left:0,right:0,display:"flex",justifyContent:"space-around",
     background:"linear-gradient(to top, #1a1a2e, #16213e)",borderTop:"1px solid rgba(255,255,255,0.08)",
     paddingBottom:"env(safe-area-inset-bottom, 8px)",paddingTop:6,zIndex:100,overflowX:"auto"}}>
     {tabs.map(t=>(<button key={t.id} onClick={()=>setActive(t.id)} style={{background:"none",border:"none",
       color:active===t.id?"#f7768e":"#7982a9",display:"flex",flexDirection:"column",alignItems:"center",gap:1,
-      fontSize:7,cursor:"pointer",transform:active===t.id?"scale(1.1)":"scale(1)",padding:"4px 3px",minWidth:0,flexShrink:0}}>
-      <span style={{fontSize:14,filter:active===t.id?"drop-shadow(0 0 6px #f7768e)":"none"}}>{t.icon}</span>
+      fontSize:7,cursor:"pointer",transform:active===t.id?"scale(1.1)":"scale(1)",padding:"4px 2px",minWidth:0,flexShrink:0}}>
+      <span style={{fontSize:13,filter:active===t.id?"drop-shadow(0 0 6px #f7768e)":"none"}}>{t.icon}</span>
       <span style={{fontWeight:active===t.id?700:400}}>{t.l}</span></button>))}
   </div>);
 }
@@ -286,22 +270,15 @@ function FlightCard({f,label}){return(
   <div style={{background:"linear-gradient(135deg, rgba(122,162,247,0.08), rgba(187,154,247,0.06))",borderRadius:14,padding:16,marginBottom:12,border:"1px solid rgba(122,162,247,0.15)"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
       <div style={{fontSize:11,color:"#7aa2f7",fontWeight:600,textTransform:"uppercase",letterSpacing:1}}>{label}</div>
-      <div style={{display:"flex",alignItems:"center",gap:6}}>
-        <span style={{fontSize:12,color:"#bb9af7",fontWeight:700}}>✈️ {f.flight}</span>
-        <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:"rgba(158,206,106,0.15)",color:"#9ece6a"}}>{f.airline}</span></div></div>
+      <span style={{fontSize:12,color:"#bb9af7",fontWeight:700}}>✈️ {f.flight}</span></div>
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
       <div style={{textAlign:"center",flex:1}}><div style={{fontSize:24,fontWeight:700,color:"#fff",fontFamily:"monospace"}}>{f.depart}</div>
         <div style={{fontSize:11,color:"#9aa5ce"}}>{f.terminal.depart}</div><div style={{fontSize:10,color:"#7982a9"}}>{f.date}</div></div>
-      <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:"#7982a9",marginBottom:2}}>{f.duration}</div>
-        <div style={{height:1,background:"linear-gradient(90deg, #7aa2f7, #bb9af7)"}}></div>
-        <div style={{fontSize:9,color:"#565f89",marginTop:4}}>{f.distance}</div></div>
+      <div style={{flex:1,textAlign:"center"}}><div style={{fontSize:10,color:"#7982a9"}}>{f.duration}</div>
+        <div style={{height:1,background:"linear-gradient(90deg, #7aa2f7, #bb9af7)"}}></div></div>
       <div style={{textAlign:"center",flex:1}}><div style={{fontSize:24,fontWeight:700,color:"#fff",fontFamily:"monospace"}}>{f.arrive}</div>
         <div style={{fontSize:11,color:"#9aa5ce"}}>{f.terminal.arrive}</div><div style={{fontSize:10,color:"#7982a9"}}>{f.arriveDate}</div></div></div>
-    <div style={{display:"flex",gap:8,flexWrap:"wrap",fontSize:10,color:"#7982a9"}}>
-      <span>🛩️ {f.aircraft}</span><span>📊 On-time: {f.onTime}</span><span>⏱️ Avg delay: {f.avgDelay}</span></div>
-    <div style={{fontSize:10,color:"#565f89",marginTop:4}}>Codeshare: {f.codeshare}</div>
-    <a href={`https://www.flightradar24.com/data/flights/${f.flight.toLowerCase().replace(" ","")}`} target="_blank" rel="noopener"
-      style={{display:"block",marginTop:10,padding:"8px",borderRadius:8,textAlign:"center",background:"rgba(122,162,247,0.12)",color:"#7aa2f7",fontSize:12,textDecoration:"none",fontWeight:600}}>🔴 Track Live Status →</a>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",fontSize:10,color:"#7982a9"}}><span>🛩️ {f.aircraft}</span><span>📊 On-time: {f.onTime}</span></div>
   </div>);}
 
 function HotelTaxiCard({h}){return(
@@ -317,8 +294,7 @@ function HotelTaxiCard({h}){return(
       <a href={`tel:${h.phone}`} style={{padding:"6px 12px",borderRadius:8,background:"rgba(158,206,106,0.12)",color:"#9ece6a",fontSize:11,textDecoration:"none",fontWeight:600}}>📞 {h.phone}</a>
       <a href={`https://www.google.com/maps/search/?api=1&query=${h.lat},${h.lng}`} target="_blank" rel="noopener"
         style={{padding:"6px 12px",borderRadius:8,background:"rgba(122,162,247,0.12)",color:"#7aa2f7",fontSize:11,textDecoration:"none",fontWeight:600}}>📍 Maps</a></div>
-    <div style={{display:"flex",gap:12,marginTop:8,fontSize:11,color:"#7982a9"}}>
-      <span>🔑 In: {h.checkin}</span><span>🔓 Out: {h.checkout}</span><span>🚃 {h.nearStation}</span></div>
+    <div style={{display:"flex",gap:12,marginTop:8,fontSize:11,color:"#7982a9"}}><span>🔑 In: {h.checkin}</span><span>🔓 Out: {h.checkout}</span><span>🚃 {h.nearStation}</span></div>
   </div>);}
 
 function TripTab(){
@@ -327,25 +303,24 @@ function TripTab(){
     <button onClick={()=>setSf(!sf)} style={{width:"100%",padding:"12px 14px",borderRadius:12,border:"none",cursor:"pointer",
       background:"linear-gradient(135deg, rgba(122,162,247,0.12), rgba(187,154,247,0.08))",color:"#7aa2f7",fontSize:14,fontWeight:600,marginBottom:12,
       display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <span>✈️ Flight Details (TG 682 / TG 683)</span><span style={{transform:sf?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
+      <span>✈️ Flight Details</span><span style={{transform:sf?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
     {sf&&<div><FlightCard f={FLIGHTS.outbound} label="Outbound — Feb 19"/><FlightCard f={FLIGHTS.return} label="Return — Feb 27"/></div>}
     <button onClick={()=>setSh(!sh)} style={{width:"100%",padding:"12px 14px",borderRadius:12,border:"none",cursor:"pointer",
       background:"linear-gradient(135deg, rgba(247,118,142,0.1), rgba(224,175,104,0.08))",color:"#f7768e",fontSize:14,fontWeight:600,marginBottom:12,
       display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <span>🏨 Hotel Cards (Show to Taxi Driver)</span><span style={{transform:sh?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
+      <span>🏨 Hotel Cards (Taxi Driver)</span><span style={{transform:sh?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
     {sh&&HOTELS.map((h,i)=><HotelTaxiCard key={i} h={h}/>)}
     <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:16}}>Your Itinerary</h2>
     {TRIP_DATA.segments.map((s,i)=>(<div key={s.id} style={{display:"flex",gap:12,marginBottom:4}}>
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:28}}>
         <div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,
-          background:s.type==="hotel"?"rgba(247,118,142,0.15)":s.type==="travel"?"rgba(122,162,247,0.15)":"rgba(158,206,106,0.15)",
-          border:`1px solid ${s.type==="hotel"?"rgba(247,118,142,0.3)":s.type==="travel"?"rgba(122,162,247,0.3)":"rgba(158,206,106,0.3)"}`,flexShrink:0}}>{s.icon}</div>
+          background:s.type==="hotel"?"rgba(247,118,142,0.15)":s.type==="travel"?"rgba(122,162,247,0.15)":"rgba(158,206,106,0.15)",flexShrink:0}}>{s.icon}</div>
         {i<TRIP_DATA.segments.length-1&&<div style={{width:1,flexGrow:1,minHeight:20,background:"rgba(255,255,255,0.08)"}}/>}</div>
       <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"10px 14px",marginBottom:8,border:"1px solid rgba(255,255,255,0.06)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
           <span style={{fontSize:14,fontWeight:600,color:"#c0caf5"}}>{s.title}</span><span style={{fontSize:11,color:"#565f89"}}>{s.date}</span></div>
         <div style={{fontSize:11,color:"#7982a9",marginTop:2}}>{s.time}</div>
-        <div style={{fontSize:12,color:"#9aa5ce",marginTop:6,lineHeight:1.5}}>{s.detail}</div>
+        <div style={{fontSize:12,color:"#9aa5ce",marginTop:6}}>{s.detail}</div>
         {s.note&&<div style={{fontSize:11,color:"#e0af68",marginTop:6,padding:"6px 8px",background:"rgba(224,175,104,0.08)",borderRadius:6}}>💡 {s.note}</div>}</div>
     </div>))}
   </div>);}
@@ -360,36 +335,38 @@ function PlannerTab(){
         {p.date.split(" ")[0]} {p.date.split(" ")[1]}</button>))}</div>
     <div style={{background:"rgba(122,162,247,0.06)",borderRadius:12,padding:14,marginBottom:14,border:"1px solid rgba(122,162,247,0.12)"}}>
       <div style={{fontSize:15,fontWeight:600,color:"#c0caf5"}}>{d.title}</div><div style={{fontSize:12,color:"#7aa2f7",marginTop:2}}>{d.date} • {d.city}</div></div>
-    <div style={{display:"flex",flexDirection:"column",gap:4}}>
-      {d.stops.map((s,i)=>(<div key={i} style={{display:"flex",gap:10}}>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:45,flexShrink:0}}>
-          <div style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",fontWeight:600,whiteSpace:"nowrap"}}>{s.time}</div>
-          {i<d.stops.length-1&&<div style={{width:1,flexGrow:1,minHeight:20,background:"rgba(255,255,255,0.06)",marginTop:4}}/>}</div>
-        <div style={{flex:1,padding:"10px 12px",borderRadius:10,marginBottom:4,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:18}}>{s.icon}</span><span style={{fontSize:13,fontWeight:600,color:"#c0caf5"}}>{s.name}</span></div>
-          <div style={{fontSize:11,color:"#e0af68",marginTop:4,padding:"4px 6px",background:"rgba(224,175,104,0.06)",borderRadius:4}}>💡 {s.tip}</div></div>
-      </div>))}</div>
+    {d.stops.map((s,i)=>(<div key={i} style={{display:"flex",gap:10,marginBottom:4}}>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:45,flexShrink:0}}>
+        <div style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",fontWeight:600}}>{s.time}</div>
+        {i<d.stops.length-1&&<div style={{width:1,flexGrow:1,minHeight:20,background:"rgba(255,255,255,0.06)",marginTop:4}}/>}</div>
+      <div style={{flex:1,padding:"10px 12px",borderRadius:10,marginBottom:4,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:18}}>{s.icon}</span><span style={{fontSize:13,fontWeight:600,color:"#c0caf5"}}>{s.name}</span></div>
+        <div style={{fontSize:11,color:"#e0af68",marginTop:4,padding:"4px 6px",background:"rgba(224,175,104,0.06)",borderRadius:4}}>💡 {s.tip}</div></div>
+    </div>))}
   </div>);}
 
 function TranslateTab(){
   const [input,setInput]=useState("");const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);
   const [listening,setListening]=useState(false);const [pf,setPf]=useState("all");
+  const doTranslate=async(text)=>{if(!text.trim())return;setLoading(true);
+    try{
+      const raw=await callOpenAI([
+        {role:"system",content:'You are a Japanese-English translator for a tourist. Translate the given text. If English→Japanese, if Japanese→English. Return ONLY JSON: {"original","translated","romanji","context"}. No markdown.'},
+        {role:"user",content:text}
+      ]);
+      const clean=raw.replace(/```json|```/g,"").trim();
+      setResult(JSON.parse(clean));
+    }catch{setResult({original:text,translated:"Translation error",romanji:"",context:""});}setLoading(false);};
   const startListen=useCallback(()=>{
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert("Try Chrome.");return;}
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
     const r=new SR();r.lang="en-US";r.interimResults=false;
     r.onresult=e=>{const t=e.results[0][0].transcript;setInput(t);setListening(false);doTranslate(t);};
     r.onerror=()=>setListening(false);r.onend=()=>setListening(false);r.start();setListening(true);},[]);
-  const doTranslate=async(text)=>{if(!text.trim())return;setLoading(true);
-    try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-        messages:[{role:"user",content:`Translate for tourist. English→Japanese or Japanese→English. Return ONLY JSON: {"original","translated","romanji","context"}. No markdown.\n\nText: "${text}"`}]})});
-      const data=await res.json();const raw=data.content[0].text.replace(/```json|```/g,"").trim();setResult(JSON.parse(raw));
-    }catch{setResult({original:text,translated:"Translation error",romanji:"",context:""});}setLoading(false);};
   const cats=["all","basics","food","navigate","shopping","emergency"];
   const filtered=pf==="all"?PHRASES:PHRASES.filter(p=>p.cat===pf);
   return(<div style={{padding:"12px 16px 100px"}}>
     <div style={{background:"rgba(247,118,142,0.06)",borderRadius:14,padding:16,marginBottom:16,border:"1px solid rgba(247,118,142,0.12)"}}>
-      <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🎙️ AI Translation</div>
+      <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🎙️ AI Translation (OpenAI)</div>
       <div style={{display:"flex",gap:8}}>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doTranslate(input)}
           placeholder="Type English or Japanese..." style={{flex:1,padding:"10px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(0,0,0,0.3)",color:"#c0caf5",fontSize:14,outline:"none"}}/>
@@ -416,54 +393,130 @@ function TranslateTab(){
         <span style={{fontSize:18,opacity:0.5}}>🔊</span></button>))}</div>
   </div>);}
 
-function ExploreTab(){
-  const [loc,setLoc]=useState(null);
-  const getLoc=()=>{navigator.geolocation?.getCurrentPosition(p=>setLoc({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true});};
-  const openM=q=>{const u=loc?`https://www.google.com/maps/search/${encodeURIComponent(q)}/@${loc.lat},${loc.lng},15z`:`https://www.google.com/maps/search/${encodeURIComponent(q)}`;window.open(u,"_blank");};
-  const qs=[{i:"🪪",l:"7-Eleven",q:"7-Eleven near me"},{i:"🍜",l:"Ramen",q:"ramen near me"},{i:"⛩️",l:"Temples",q:"temple shrine near me"},
-    {i:"🍣",l:"Sushi",q:"sushi near me"},{i:"🧊",l:"ATM",q:"ATM near me"},{i:"💊",l:"Pharmacy",q:"pharmacy near me"},
-    {i:"☕",l:"Café",q:"cafe near me"},{i:"🍺",l:"Izakaya",q:"izakaya near me"},{i:"🗑️",l:"Trash (Konbini)",q:"convenience store near me"},{i:"🏪",l:"Donki",q:"Don Quijote near me"}];
-  return(<div style={{padding:"12px 16px 100px"}}>
-    {/* Currency */}
-    <CurrencyConverter/>
-    {/* Trash tips */}
-    <div style={{background:"rgba(158,206,106,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(158,206,106,0.1)"}}>
-      <div style={{fontSize:13,color:"#9ece6a",fontWeight:600,marginBottom:8}}>🗑️ Trash Can Finder</div>
-      <div style={{fontSize:11,color:"#9aa5ce",marginBottom:8}}>Japan has almost no public trash cans! Here's where to find them:</div>
-      {TRASH_TIPS.map((t,i)=>(<div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:6,marginBottom:2,background:"rgba(255,255,255,0.02)"}}>
-        <span style={{fontSize:14}}>{t.icon}</span><div style={{flex:1}}><span style={{fontSize:11,fontWeight:600,color:"#c0caf5"}}>{t.name}</span>
-        {t.reliable&&<span style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:"rgba(158,206,106,0.15)",color:"#9ece6a",marginLeft:4}}>✓</span>}
-        <div style={{fontSize:10,color:"#7982a9"}}>{t.desc}</div></div></div>))}
-      <button onClick={()=>openM("convenience store near me")} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
-        background:"rgba(158,206,106,0.15)",color:"#9ece6a",fontSize:12,fontWeight:600}}>🗑️ Find Nearest Konbini →</button></div>
-    {/* Location */}
-    <div style={{background:"rgba(122,162,247,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(122,162,247,0.12)"}}>
-      <button onClick={getLoc} style={{width:"100%",padding:"10px",borderRadius:10,border:"none",cursor:"pointer",
-        background:"rgba(122,162,247,0.15)",color:"#7aa2f7",fontSize:13,fontWeight:600}}>
-        {loc?`📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`:"📍 Enable Location"}</button>
-      {loc&&<button onClick={()=>{const m=`https://www.google.com/maps?q=${loc.lat},${loc.lng}`;navigator.share?navigator.share({title:"My Location",text:m}):navigator.clipboard?.writeText(m);}}
-        style={{width:"100%",padding:"8px",borderRadius:8,border:"none",cursor:"pointer",background:"rgba(247,118,142,0.12)",color:"#f7768e",fontSize:12,fontWeight:600,marginTop:8}}>📤 Share Location</button>}</div>
-    {/* Quick search grid */}
-    <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🔍 Find Nearby</div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(2, 1fr)",gap:8,marginBottom:20}}>
-      {qs.map((s,i)=>(<button key={i} onClick={()=>openM(s.q)} style={{padding:"14px 10px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",
-        background:"rgba(255,255,255,0.03)",cursor:"pointer",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:500}}>{s.l}</span></button>))}</div>
-    {/* Taxi */}
-    <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🚖 Taxi Apps</div>
-    {[{n:"GO Taxi",d:"Most popular",u:"https://go.goinc.jp/"},{n:"Uber Japan",d:"Major cities",u:"https://www.uber.com/jp/en/"},{n:"S.RIDE",d:"Tokyo area",u:"https://www.sride.jp/"}]
-      .map((t,i)=>(<a key={i} href={t.u} target="_blank" rel="noopener" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:10,marginBottom:8,
-        border:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.03)",textDecoration:"none"}}>
-        <span style={{fontSize:22}}>🚖</span><div><div style={{fontSize:14,color:"#c0caf5",fontWeight:600}}>{t.n}</div><div style={{fontSize:11,color:"#7982a9"}}>{t.d}</div></div>
-        <span style={{marginLeft:"auto",fontSize:12,color:"#565f89"}}>→</span></a>))}
-    {/* Transit links */}
-    <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10,marginTop:12}}>🚃 Getting Around</div>
-    {[{l:"Tokyo Metro Map",u:"https://www.tokyometro.jp/en/subwaymap/"},{l:"Hyperdia Trains",u:"https://www.hyperdia.com/"},{l:"Google Maps Transit",u:"https://www.google.com/maps/@35.68,139.65,12z"}]
-      .map((t,i)=>(<a key={i} href={t.u} target="_blank" rel="noopener" style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-        padding:"10px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,0.05)",background:"rgba(255,255,255,0.02)",textDecoration:"none",marginBottom:6}}>
-        <span style={{fontSize:13,color:"#c0caf5"}}>{t.l}</span><span style={{color:"#565f89",fontSize:12}}>↗</span></a>))}
-  </div>);}
+// ━━━ CAMERA TRANSLATOR (Google Lens-like) ━━━━━━━━━━━━━━━━━━━━━━━━
+function CameraTab(){
+  const videoRef=useRef(null);const canvasRef=useRef(null);
+  const [streaming,setStreaming]=useState(false);const [result,setResult]=useState(null);
+  const [loading,setLoading]=useState(false);const [mode,setMode]=useState("camera"); // camera | upload
+  const [preview,setPreview]=useState(null);
 
+  const startCamera=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}});
+      if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play();setStreaming(true);}
+    }catch{alert("Camera access denied. Use upload mode instead.");setMode("upload");}
+  };
+  const stopCamera=()=>{if(videoRef.current?.srcObject){videoRef.current.srcObject.getTracks().forEach(t=>t.stop());setStreaming(false);}};
+
+  useEffect(()=>{if(mode==="camera")startCamera();return()=>stopCamera();},[mode]);
+
+  const captureAndTranslate=async()=>{
+    if(!videoRef.current||!canvasRef.current)return;
+    const v=videoRef.current;const c=canvasRef.current;
+    c.width=v.videoWidth;c.height=v.videoHeight;
+    c.getContext("2d").drawImage(v,0,0);
+    const base64=c.toDataURL("image/jpeg",0.8).split(",")[1];
+    setPreview(c.toDataURL("image/jpeg",0.8));
+    await translateImage(base64);
+  };
+
+  const handleUpload=async(e)=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=async(ev)=>{
+      const dataUrl=ev.target.result;
+      setPreview(dataUrl);
+      const base64=dataUrl.split(",")[1];
+      await translateImage(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const translateImage=async(base64)=>{
+    setLoading(true);setResult(null);
+    try{
+      const text=await callVision(base64,
+        `You are a Japanese-to-English translator helping a tourist in Japan. Look at this image and:
+1. Identify ALL Japanese text visible (signs, menus, labels, etc.)
+2. For each text found, provide the Japanese, romaji, and English translation
+3. If it's a menu, translate all items with approximate prices if visible
+4. Add brief context tips (e.g. "this is a train station exit sign")
+
+Format as JSON: {"items":[{"japanese":"...","romaji":"...","english":"...","context":"..."}],"summary":"brief description of what you see"}
+Return ONLY JSON, no markdown.`
+      );
+      const clean=text.replace(/```json|```/g,"").trim();
+      setResult(JSON.parse(clean));
+    }catch(err){
+      setResult({items:[],summary:"Could not translate. Try again with a clearer image."});
+    }
+    setLoading(false);
+  };
+
+  return(<div style={{padding:"12px 16px 100px"}}>
+    <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>📷 Camera Translator</h2>
+    <div style={{display:"flex",gap:6,marginBottom:12}}>
+      {["camera","upload"].map(m=>(<button key={m} onClick={()=>{setMode(m);setResult(null);setPreview(null);}} style={{flex:1,padding:"8px",borderRadius:10,border:"none",cursor:"pointer",
+        background:mode===m?"rgba(247,118,142,0.2)":"rgba(255,255,255,0.04)",color:mode===m?"#f7768e":"#7982a9",fontSize:12,fontWeight:600}}>
+        {m==="camera"?"📷 Live Camera":"📁 Upload Photo"}</button>))}
+    </div>
+
+    {mode==="camera"&&(<div style={{position:"relative",borderRadius:14,overflow:"hidden",marginBottom:12,background:"#000",aspectRatio:"4/3"}}>
+      <video ref={videoRef} style={{width:"100%",height:"100%",objectFit:"cover"}} playsInline muted/>
+      <canvas ref={canvasRef} style={{display:"none"}}/>
+      <button onClick={captureAndTranslate} disabled={loading||!streaming}
+        style={{position:"absolute",bottom:16,left:"50%",transform:"translateX(-50%)",
+          width:70,height:70,borderRadius:"50%",border:"4px solid rgba(255,255,255,0.8)",cursor:"pointer",
+          background:loading?"rgba(247,118,142,0.8)":"rgba(255,255,255,0.2)",
+          display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,color:"#fff",
+          backdropFilter:"blur(4px)"}}>
+        {loading?"⏳":"📸"}</button>
+      {!streaming&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#7982a9",fontSize:13}}>Starting camera...</div>}
+    </div>)}
+
+    {mode==="upload"&&(<div style={{marginBottom:12}}>
+      <label style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8,padding:30,borderRadius:14,
+        border:"2px dashed rgba(122,162,247,0.3)",background:"rgba(122,162,247,0.04)",cursor:"pointer",textAlign:"center"}}>
+        <span style={{fontSize:40}}>📁</span>
+        <span style={{fontSize:13,color:"#7aa2f7"}}>Tap to select a photo</span>
+        <span style={{fontSize:11,color:"#7982a9"}}>Menu, sign, label — any Japanese text</span>
+        <input type="file" accept="image/*" capture="environment" onChange={handleUpload} style={{display:"none"}}/>
+      </label>
+    </div>)}
+
+    {preview&&(<div style={{marginBottom:12,borderRadius:10,overflow:"hidden"}}>
+      <img src={preview} style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:10}} alt="captured"/>
+    </div>)}
+
+    {loading&&(<div style={{textAlign:"center",padding:20,color:"#7aa2f7",fontSize:13}}>
+      <div style={{fontSize:30,marginBottom:8,animation:"pulse 1s infinite"}}>🔍</div>
+      Analyzing image with AI...</div>)}
+
+    {result&&(<div style={{background:"rgba(0,0,0,0.2)",borderRadius:14,padding:16,border:"1px solid rgba(255,255,255,0.08)"}}>
+      {result.summary&&<div style={{fontSize:12,color:"#e0af68",marginBottom:12,padding:"8px 10px",background:"rgba(224,175,104,0.08)",borderRadius:8}}>📝 {result.summary}</div>}
+      {result.items?.length>0?(<div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {result.items.map((item,i)=>(<div key={i} style={{padding:"10px 12px",borderRadius:10,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)"}}>
+          <div style={{fontSize:18,color:"#fff",fontFamily:"'Noto Serif JP', serif"}}>{item.japanese}</div>
+          {item.romaji&&<div style={{fontSize:12,color:"#7aa2f7",marginTop:2}}>{item.romaji}</div>}
+          <div style={{fontSize:14,color:"#9ece6a",marginTop:4,fontWeight:600}}>{item.english}</div>
+          {item.context&&<div style={{fontSize:11,color:"#7982a9",marginTop:2}}>{item.context}</div>}
+          <button onClick={()=>speak(item.japanese)} style={{marginTop:6,padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",background:"rgba(158,206,106,0.1)",color:"#9ece6a",fontSize:11}}>🔊 Listen</button>
+        </div>))}
+      </div>):(!loading&&<div style={{textAlign:"center",color:"#565f89",fontSize:13}}>No Japanese text detected</div>)}
+    </div>)}
+
+    <div style={{marginTop:16,padding:14,borderRadius:12,background:"rgba(224,175,104,0.06)",border:"1px solid rgba(224,175,104,0.12)"}}>
+      <div style={{fontSize:12,color:"#e0af68",fontWeight:600,marginBottom:6}}>💡 Tips for best results</div>
+      <div style={{fontSize:11,color:"#9aa5ce",lineHeight:1.6}}>
+        • Hold camera steady and close to text<br/>
+        • Good lighting helps a lot<br/>
+        • Works great on: menus, signs, train schedules, labels<br/>
+        • Upload mode works for saved photos too</div>
+    </div>
+  </div>);
+}
+
+// ━━━ EXPLORE TAB (with ATM Finder + more Konbini) ━━━━━━━━━━━━━━━━
 function CurrencyConverter(){
   const [a,setA]=useState("1000");const [d,setD]=useState("jpy");
   const r=0.0067;const c=d==="jpy"?(parseFloat(a||0)*r).toFixed(2):(parseFloat(a||0)/r).toFixed(0);
@@ -476,12 +529,90 @@ function CurrencyConverter(){
       <div style={{flex:1}}><input value={a} onChange={e=>setA(e.target.value.replace(/[^0-9.]/g,""))}
         style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(0,0,0,0.3)",color:"#fff",fontSize:18,fontWeight:700,outline:"none",fontFamily:"monospace"}}/></div>
       <div style={{fontSize:20,color:"#565f89"}}>→</div>
-      <div style={{flex:1}}><div style={{padding:"8px 12px",borderRadius:8,background:"rgba(158,206,106,0.1)",color:"#9ece6a",fontSize:18,fontWeight:700,fontFamily:"monospace",
-        border:"1px solid rgba(158,206,106,0.15)"}}>{d==="jpy"?"$":"¥"}{c}</div></div></div>
+      <div style={{flex:1}}><div style={{padding:"8px 12px",borderRadius:8,background:"rgba(158,206,106,0.1)",color:"#9ece6a",fontSize:18,fontWeight:700,fontFamily:"monospace"}}>
+        {d==="jpy"?"$":"¥"}{c}</div></div></div>
     <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
       {(d==="jpy"?[500,1000,3000,5000,10000]:[5,10,20,50,100]).map(x=>(<button key={x} onClick={()=>setA(String(x))} style={{padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",
-        background:"rgba(255,255,255,0.05)",color:"#9aa5ce",fontSize:11}}>{d==="jpy"?`¥${x.toLocaleString()}`:`$${x}`}</button>))}</div>
-    <div style={{fontSize:10,color:"#565f89",marginTop:6}}>~¥150 = $1 (approx)</div></div>);}
+        background:"rgba(255,255,255,0.05)",color:"#9aa5ce",fontSize:11}}>{d==="jpy"?`¥${x.toLocaleString()}`:`$${x}`}</button>))}</div></div>);}
+
+function ExploreTab(){
+  const [loc,setLoc]=useState(null);
+  const getLoc=()=>{navigator.geolocation?.getCurrentPosition(p=>setLoc({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true});};
+  const openM=q=>{const u=loc?`https://www.google.com/maps/search/${encodeURIComponent(q)}/@${loc.lat},${loc.lng},15z`:`https://www.google.com/maps/search/${encodeURIComponent(q)}`;window.open(u,"_blank");};
+
+  const konbini=[
+    {i:"🏪",l:"7-Eleven",q:"7-Eleven near me",c:"#e63946"},{i:"🔵",l:"Lawson",q:"Lawson near me",c:"#457b9d"},
+    {i:"🟢",l:"FamilyMart",q:"FamilyMart near me",c:"#2a9d8f"},{i:"🟡",l:"Ministop",q:"Ministop near me",c:"#e9c46a"}];
+  const atmSpots=[
+    {i:"🏧",l:"7-Eleven ATM",q:"7-Eleven ATM near me",note:"Most reliable for foreign cards. 24/7."},
+    {i:"🏧",l:"Japan Post ATM",q:"Japan Post ATM near me",note:"Works with Visa/MC. Business hours."},
+    {i:"🏧",l:"Lawson ATM",q:"Lawson Bank ATM near me",note:"Accepts most international cards."},
+    {i:"🏧",l:"FamilyMart ATM",q:"FamilyMart E-net ATM near me",note:"Look for E-net or AEON logo."},
+    {i:"🏦",l:"AEON Bank ATM",q:"AEON Bank ATM near me",note:"In malls. Good for foreign cards."},
+  ];
+  const qs=[{i:"🍜",l:"Ramen",q:"ramen near me"},{i:"⛩️",l:"Temples",q:"temple shrine near me"},
+    {i:"🍣",l:"Sushi",q:"sushi near me"},{i:"💊",l:"Pharmacy",q:"pharmacy near me"},
+    {i:"☕",l:"Café",q:"cafe near me"},{i:"🍺",l:"Izakaya",q:"izakaya near me"},
+    {i:"🪩",l:"Donki",q:"Don Quijote near me"},{i:"🚻",l:"Toilet",q:"public toilet near me"}];
+
+  return(<div style={{padding:"12px 16px 100px"}}>
+    <CurrencyConverter/>
+
+    {/* Location */}
+    <div style={{background:"rgba(122,162,247,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(122,162,247,0.12)"}}>
+      <button onClick={getLoc} style={{width:"100%",padding:"10px",borderRadius:10,border:"none",cursor:"pointer",
+        background:"rgba(122,162,247,0.15)",color:"#7aa2f7",fontSize:13,fontWeight:600}}>
+        {loc?`📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`:"📍 Enable Location"}</button></div>
+
+    {/* Konbini Finder */}
+    <div style={{fontSize:13,color:"#9ece6a",fontWeight:600,marginBottom:8}}>🏪 Convenience Stores</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(2, 1fr)",gap:8,marginBottom:16}}>
+      {konbini.map((s,i)=>(<button key={i} onClick={()=>openM(s.q)} style={{padding:"14px 10px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",
+        background:"rgba(255,255,255,0.03)",cursor:"pointer",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:600}}>{s.l}</span></button>))}
+    </div>
+
+    {/* ATM Finder */}
+    <div style={{background:"rgba(187,154,247,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(187,154,247,0.12)"}}>
+      <div style={{fontSize:13,color:"#bb9af7",fontWeight:600,marginBottom:10}}>🏧 ATM Finder (Foreign Cards)</div>
+      <div style={{fontSize:11,color:"#9aa5ce",marginBottom:10}}>Japan is cash-heavy! These ATMs accept international Visa/Mastercard:</div>
+      {atmSpots.map((a,i)=>(<button key={i} onClick={()=>openM(a.q)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,
+        border:"1px solid rgba(255,255,255,0.05)",background:"rgba(255,255,255,0.02)",cursor:"pointer",textAlign:"left",width:"100%",marginBottom:6}}>
+        <span style={{fontSize:22}}>{a.i}</span>
+        <div style={{flex:1}}><div style={{fontSize:13,color:"#c0caf5",fontWeight:600}}>{a.l}</div>
+          <div style={{fontSize:10,color:"#7982a9"}}>{a.note}</div></div>
+        <span style={{color:"#bb9af7",fontSize:12}}>→</span></button>))}
+      <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"rgba(224,175,104,0.08)",fontSize:11,color:"#e0af68"}}>
+        💡 7-Eleven ATMs are the most reliable for foreign cards. Available 24/7 nationwide!</div>
+    </div>
+
+    {/* Trash tips (compact) */}
+    <div style={{background:"rgba(158,206,106,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(158,206,106,0.1)"}}>
+      <div style={{fontSize:13,color:"#9ece6a",fontWeight:600,marginBottom:6}}>🗑️ Where to find trash cans</div>
+      <div style={{fontSize:11,color:"#9aa5ce",lineHeight:1.8}}>
+        🏪 Konbini (7-Eleven, Lawson, FamilyMart)<br/>
+        🚃 Train station platforms<br/>
+        🥤 Next to vending machines<br/>
+        🎒 Pro tip: carry a small bag for trash!</div>
+      <button onClick={()=>openM("convenience store near me")} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
+        background:"rgba(158,206,106,0.15)",color:"#9ece6a",fontSize:12,fontWeight:600}}>🗑️ Find Nearest Konbini →</button></div>
+
+    {/* Quick search */}
+    <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🔍 Find Nearby</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(2, 1fr)",gap:8,marginBottom:20}}>
+      {qs.map((s,i)=>(<button key={i} onClick={()=>openM(s.q)} style={{padding:"14px 10px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",
+        background:"rgba(255,255,255,0.03)",cursor:"pointer",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:500}}>{s.l}</span></button>))}
+    </div>
+
+    {/* Taxi & Transit */}
+    <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🚖 Taxi & Transit</div>
+    {[{n:"GO Taxi",d:"Most popular",u:"https://go.goinc.jp/"},{n:"Tokyo Metro Map",d:"Subway map",u:"https://www.tokyometro.jp/en/subwaymap/"},{n:"Google Maps Transit",d:"All routes",u:"https://www.google.com/maps/@35.68,139.65,12z"}]
+      .map((t,i)=>(<a key={i} href={t.u} target="_blank" rel="noopener" style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:10,marginBottom:6,
+        border:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.03)",textDecoration:"none"}}>
+        <div><div style={{fontSize:13,color:"#c0caf5",fontWeight:600}}>{t.n}</div><div style={{fontSize:11,color:"#7982a9"}}>{t.d}</div></div>
+        <span style={{marginLeft:"auto",color:"#565f89",fontSize:12}}>→</span></a>))}
+  </div>);}
 
 function NightlifeTab(){
   const [sec,setSec]=useState("whiskey");
@@ -493,26 +624,17 @@ function NightlifeTab(){
       {secs.map(s=>(<button key={s.id} onClick={()=>setSec(s.id)} style={{padding:"8px 14px",borderRadius:10,border:"none",cursor:"pointer",
         background:sec===s.id?"rgba(187,154,247,0.2)":"rgba(255,255,255,0.04)",color:sec===s.id?"#bb9af7":"#7982a9",fontSize:12,fontWeight:600,whiteSpace:"nowrap",flexShrink:0}}>
         {s.icon} {s.l}</button>))}</div>
-    {sec==="shopping"?(<div style={{display:"flex",flexDirection:"column",gap:8}}>
-      {items.map((s,i)=>(<div key={i} style={{padding:"12px 14px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.03)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-          <span style={{fontSize:22}}>{s.icon}</span><div style={{flex:1}}>
-            <div style={{fontSize:14,fontWeight:600,color:"#c0caf5"}}>{s.name}</div><div style={{fontSize:11,color:"#bb9af7"}}>{s.area}</div></div>
-          <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:"rgba(224,175,104,0.12)",color:"#e0af68"}}>{s.cat}</span></div>
-        <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.5,marginBottom:4}}>{s.desc}</div>
-        <div style={{fontSize:11,color:"#e0af68",padding:"4px 6px",background:"rgba(224,175,104,0.06)",borderRadius:4}}>💡 {s.tip}</div></div>))}
-    </div>):(<div style={{display:"flex",flexDirection:"column",gap:8}}>
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {items.map((v,i)=>(<div key={i} style={{padding:"12px 14px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.03)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-          <div style={{fontSize:14,fontWeight:600,color:"#c0caf5"}}>{v.name}</div>
-          <div style={{display:"flex",gap:4}}><span style={{fontSize:10,color:"#bb9af7"}}>{v.area}</span>
-            <span style={{fontSize:10,padding:"1px 6px",borderRadius:4,background:"rgba(224,175,104,0.12)",color:"#e0af68"}}>{v.price}</span></div></div>
+          <div style={{fontSize:14,fontWeight:600,color:"#c0caf5"}}>{v.icon||""} {v.name}</div>
+          <span style={{fontSize:10,color:"#bb9af7"}}>{v.area}</span></div>
         <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.5,marginBottom:4}}>{v.desc}</div>
-        <div style={{fontSize:11,color:"#7982a9",marginBottom:4}}>🕐 {v.hours}</div>
+        {v.hours&&<div style={{fontSize:11,color:"#7982a9",marginBottom:4}}>🕐 {v.hours}</div>}
         <div style={{fontSize:11,color:"#e0af68",padding:"4px 6px",background:"rgba(224,175,104,0.06)",borderRadius:4,marginBottom:8}}>💡 {v.tip}</div>
-        <a href={`https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`} target="_blank" rel="noopener"
-          style={{display:"block",padding:"6px",borderRadius:6,textAlign:"center",background:"rgba(122,162,247,0.1)",color:"#7aa2f7",fontSize:11,textDecoration:"none",fontWeight:600}}>📍 Maps</a>
-      </div>))}</div>)}
+        {v.lat&&<a href={`https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}`} target="_blank" rel="noopener"
+          style={{display:"block",padding:"6px",borderRadius:6,textAlign:"center",background:"rgba(122,162,247,0.1)",color:"#7aa2f7",fontSize:11,textDecoration:"none",fontWeight:600}}>📍 Maps</a>}
+      </div>))}</div>
   </div>);}
 
 function PlacesTab(){
@@ -533,14 +655,11 @@ function PlacesTab(){
             <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14,fontWeight:600,color:"#c0caf5"}}>{a.name}</span>
               {a.mustSee&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:4,background:"rgba(247,118,142,0.2)",color:"#f7768e"}}>MUST SEE</span>}</div>
             <div style={{fontSize:11,color:"#7982a9",marginTop:2}}>{a.hours} • {a.price} • {a.time}</div></div>
-          <span style={{color:"#565f89",fontSize:14,transform:exp===i?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
-        {exp===i&&(<div style={{padding:"0 14px 14px",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
+          <span style={{color:"#565f89",transform:exp===i?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
+        {exp===i&&(<div style={{padding:"0 14px 14px"}}>
           <div style={{fontSize:12,color:"#e0af68",padding:"10px",marginTop:8,background:"rgba(224,175,104,0.08)",borderRadius:8}}>💡 {a.tip}</div>
-          <div style={{display:"flex",gap:8,marginTop:10}}>
-            <a href={`https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lng}`} target="_blank" rel="noopener"
-              style={{flex:1,padding:"8px",borderRadius:8,textAlign:"center",background:"rgba(122,162,247,0.15)",color:"#7aa2f7",fontSize:12,textDecoration:"none",fontWeight:600}}>📍 Maps</a>
-            <a href={`https://www.google.com/search?q=${encodeURIComponent(a.name+" "+city+" Japan")}`} target="_blank" rel="noopener"
-              style={{flex:1,padding:"8px",borderRadius:8,textAlign:"center",background:"rgba(158,206,106,0.15)",color:"#9ece6a",fontSize:12,textDecoration:"none",fontWeight:600}}>🔎 Info</a></div>
+          <a href={`https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lng}`} target="_blank" rel="noopener"
+            style={{display:"block",marginTop:8,padding:"8px",borderRadius:8,textAlign:"center",background:"rgba(122,162,247,0.15)",color:"#7aa2f7",fontSize:12,textDecoration:"none",fontWeight:600}}>📍 Open in Maps</a>
         </div>)}</div>))}</div>
   </div>);}
 
@@ -606,33 +725,28 @@ function ExpenseTab(){
     {ex.length===0&&<div style={{textAlign:"center",padding:30,color:"#565f89",fontSize:13}}>No expenses yet</div>}
   </div>);}
 
-// ━━━ AI CHAT TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ AI CHAT TAB (OpenAI) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function ChatTab(){
-  const [msgs,setMsgs]=useState([{role:"assistant",content:"こんにちは! I'm your Japan travel AI assistant. Ask me anything about your trip — restaurants, directions, cultural tips, or language help! 🇯🇵"}]);
+  const [msgs,setMsgs]=useState([{role:"assistant",content:"こんにちは! I'm your Japan travel AI. Ask me anything — restaurants, directions, cultural tips, or language help! 🇯🇵"}]);
   const [input,setInput]=useState("");const [loading,setLoading]=useState(false);const endRef=useRef(null);
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
   const send=async()=>{
     if(!input.trim()||loading)return;const userMsg=input.trim();setInput("");
     setMsgs(p=>[...p,{role:"user",content:userMsg}]);setLoading(true);
     try{
-      const sysPrompt=`You are a helpful Japan travel assistant for someone visiting Kyoto (Feb 20-22) and Tokyo (Feb 22-27, 2026). Hotels: The OneFive Kyoto Shijo and the b asakusa in Tokyo. Flights: TG 682 BKK→HND Feb 19, TG 683 HND→BKK Feb 27. Be concise, practical, and friendly. Include Japanese phrases when helpful. Use emoji sparingly. Max 150 words per response.`;
-      const apiMsgs=[{role:"user",content:sysPrompt+"\\n\\nConversation so far:\\n"+msgs.slice(-6).map(m=>`${m.role}: ${m.content}`).join("\\n")+"\\n\\nUser: "+userMsg}];
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:apiMsgs})});
-      const data=await res.json();
-      const text=data.content.map(c=>c.text||"").join("");
-      setMsgs(p=>[...p,{role:"assistant",content:text}]);
-    }catch(e){setMsgs(p=>[...p,{role:"assistant",content:"Sorry, I couldn't connect. Check your internet and try again."}]);}
+      const sysMsg={role:"system",content:`You are a helpful Japan travel assistant for someone visiting Kyoto (Feb 20-22) and Tokyo (Feb 22-27, 2026). Hotels: The OneFive Kyoto Shijo and the b asakusa in Tokyo. Flights: TG 682 BKK→HND Feb 19, TG 683 HND→BKK Feb 27. Be concise, practical, friendly. Include Japanese phrases when helpful. Max 150 words.`};
+      const history=msgs.slice(-6).map(m=>({role:m.role,content:m.content}));
+      const text=await callOpenAI([sysMsg,...history,{role:"user",content:userMsg}]);
+      setMsgs(p=>[...p,{role:"assistant",content:text||"Sorry, couldn't connect. Try again."}]);
+    }catch{setMsgs(p=>[...p,{role:"assistant",content:"Connection error. Check internet."}]);}
     setLoading(false);
   };
   const quickQ=["Best ramen near my hotel?","How to use the subway?","What should I do tonight?","Translate: Where is the exit?"];
   return(<div style={{padding:"12px 16px 100px",display:"flex",flexDirection:"column",height:"calc(100vh - 140px)"}}>
-    <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>🤖 Japan AI Assistant</h2>
-    {/* Quick questions */}
+    <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>🤖 Japan AI (OpenAI)</h2>
     {msgs.length<=1&&(<div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-      {quickQ.map((q,i)=>(<button key={i} onClick={()=>{setInput(q);}} style={{padding:"6px 12px",borderRadius:20,border:"1px solid rgba(122,162,247,0.15)",
+      {quickQ.map((q,i)=>(<button key={i} onClick={()=>setInput(q)} style={{padding:"6px 12px",borderRadius:20,border:"1px solid rgba(122,162,247,0.15)",
         background:"rgba(122,162,247,0.06)",color:"#7aa2f7",fontSize:11,cursor:"pointer"}}>{q}</button>))}</div>)}
-    {/* Messages */}
     <div style={{flex:1,overflowY:"auto",marginBottom:12,display:"flex",flexDirection:"column",gap:8}}>
       {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
         <div style={{maxWidth:"85%",padding:"10px 14px",borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
@@ -640,9 +754,8 @@ function ChatTab(){
           border:`1px solid ${m.role==="user"?"rgba(122,162,247,0.2)":"rgba(255,255,255,0.06)"}`,
           fontSize:13,color:m.role==="user"?"#c0caf5":"#9aa5ce",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div></div>))}
       {loading&&<div style={{display:"flex",justifyContent:"flex-start"}}><div style={{padding:"10px 14px",borderRadius:"14px 14px 14px 4px",
-        background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",fontSize:13,color:"#565f89"}}>Thinking...</div></div>}
+        background:"rgba(255,255,255,0.04)",fontSize:13,color:"#565f89"}}>Thinking...</div></div>}
       <div ref={endRef}/></div>
-    {/* Input */}
     <div style={{display:"flex",gap:8,position:"sticky",bottom:70}}>
       <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}
         placeholder="Ask anything about Japan..." style={{flex:1,padding:"12px 14px",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
@@ -652,23 +765,12 @@ function ChatTab(){
         {loading?"⏳":"→"}</button></div>
   </div>);}
 
-function CultureTab(){return(<div style={{padding:"12px 16px 100px"}}>
-  <div style={{background:"rgba(158,206,106,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(158,206,106,0.1)"}}>
-    <div style={{fontSize:14,color:"#9ece6a",fontWeight:600,marginBottom:4}}>🇯🇵 Respect & Harmony</div>
-    <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.6}}>Japanese culture values 和 (wa) — harmony. Being polite, quiet, and respectful goes a long way. A bow and "arigatou gozaimasu" is always appreciated.</div></div>
-  <div style={{display:"flex",flexDirection:"column",gap:8}}>
-    {ETIQUETTE.map((e,i)=>(<div key={i} style={{padding:"12px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,0.05)",background:"rgba(255,255,255,0.02)"}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><span style={{fontSize:22}}>{e.icon}</span>
-        <span style={{fontSize:14,color:"#c0caf5",fontWeight:600}}>{e.title}</span></div>
-      <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.6,paddingLeft:30}}>{e.text}</div></div>))}</div></div>);}
-
 function SOSTab(){return(<div style={{padding:"12px 16px 100px"}}>
   <div style={{textAlign:"center",marginBottom:20}}>
     <a href="tel:110" style={{display:"inline-flex",width:120,height:120,borderRadius:"50%",alignItems:"center",justifyContent:"center",textDecoration:"none",
       background:"radial-gradient(circle, #f7768e 0%, #db4b4b 100%)",boxShadow:"0 0 40px rgba(247,118,142,0.3)",
-      border:"3px solid rgba(255,255,255,0.15)",fontSize:18,fontWeight:800,color:"#fff",letterSpacing:3}}>SOS</a>
+      fontSize:18,fontWeight:800,color:"#fff",letterSpacing:3}}>SOS</a>
     <div style={{fontSize:11,color:"#7982a9",marginTop:8}}>Tap to call Police (110)</div></div>
-  <div style={{fontSize:13,color:"#f7768e",marginBottom:10,fontWeight:600}}>Emergency Contacts</div>
   {EMERGENCY.map((e,i)=>(<div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:10,marginBottom:8,
     border:"1px solid rgba(247,118,142,0.1)",background:"rgba(247,118,142,0.04)"}}>
     <span style={{fontSize:28}}>{e.icon}</span><div style={{flex:1}}><div style={{fontSize:14,color:"#c0caf5",fontWeight:600}}>{e.label}</div>
@@ -686,12 +788,10 @@ function SOSTab(){return(<div style={{padding:"12px 16px 100px"}}>
   <div style={{marginTop:16,padding:14,borderRadius:12,background:"rgba(224,175,104,0.06)",border:"1px solid rgba(224,175,104,0.12)"}}>
     <div style={{fontSize:13,color:"#e0af68",fontWeight:600,marginBottom:8}}>📋 Good to Know</div>
     <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.8}}>
-      • Japan is extremely safe — stay aware in crowded areas<br/>
-      • Police boxes (交番 kōban) are everywhere — they help with directions too<br/>
-      • Keep a photo of your passport and hotel address on your phone<br/>
-      • Your hotel front desk can assist with most emergencies</div></div></div>);}
+      • Japan is extremely safe<br/>• Police boxes (交番 kōban) everywhere — help with directions too<br/>
+      • Keep passport photo + hotel address on phone<br/>• Hotel front desk helps with emergencies</div></div></div>);}
 
-// ━━━ MAIN APP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ MAIN APP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export default function JapanTravelAssistant(){
   const [tab,setTab]=useState("trip");
   return(<div style={{minHeight:"100vh",background:"#1a1a2e",color:"#c0caf5",fontFamily:"'Noto Sans JP', -apple-system, sans-serif",maxWidth:480,margin:"0 auto",position:"relative"}}>
@@ -699,12 +799,13 @@ export default function JapanTravelAssistant(){
       @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Noto+Serif+JP:wght@400;600&display=swap');
       @keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(247,118,142,0.4);}50%{transform:scale(1.05);box-shadow:0 0 0 12px rgba(247,118,142,0);}}
       *{box-sizing:border-box;margin:0;padding:0;}::-webkit-scrollbar{width:0;}body{background:#1a1a2e;}
-      input::placeholder{color:#565f89;}button:active{opacity:0.8;}a:active{opacity:0.8;}
+      input::placeholder{color:#565f89;}button:active{opacity:0.8;}
     `}</style>
     <Header/>
     {tab==="trip"&&<TripTab/>}
     {tab==="planner"&&<PlannerTab/>}
     {tab==="translate"&&<TranslateTab/>}
+    {tab==="camera"&&<CameraTab/>}
     {tab==="explore"&&<ExploreTab/>}
     {tab==="nightlife"&&<NightlifeTab/>}
     {tab==="places"&&<PlacesTab/>}
