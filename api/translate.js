@@ -1,8 +1,7 @@
-// Vercel Serverless Function — proxies translation requests to OpenAI
-// Your OPENAI_API_KEY stays safe on the server, never exposed to the browser.
+// Vercel Serverless Function — proxies to OpenAI (translation + vision)
+// Set OPENAI_API_KEY in Vercel Environment Variables
 
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -10,42 +9,59 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { text } = req.body;
-  if (!text?.trim()) return res.status(400).json({ error: "No text provided" });
-
   const OPENAI_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_KEY) return res.status(500).json({ error: "API key not configured" });
+
+  const { text, image, mode } = req.body;
+
+  // Vision mode: translate image
+  if (mode === "vision" && image) {
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: `data:image/jpeg;base64,${image}` } },
+              { type: "text", text: 'Identify ALL Japanese text in this image. For each, provide Japanese, romaji, and English translation. Return ONLY JSON: {"items":[{"japanese":"...","romaji":"...","english":"...","context":"..."}],"summary":"..."}' }
+            ]
+          }],
+          temperature: 0.3,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) return res.status(response.status).json({ error: data.error?.message });
+      const raw = data.choices[0].message.content.replace(/```json|```/g, "").trim();
+      return res.status(200).json(JSON.parse(raw));
+    } catch (err) {
+      return res.status(500).json({ error: "Vision failed", detail: err.message });
+    }
+  }
+
+  // Text translation mode
+  if (!text?.trim()) return res.status(400).json({ error: "No text provided" });
 
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_KEY}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "system",
-            content:
-              'You are a Japanese-English translator for a tourist in Japan. Translate the given text. If the input is in English, translate to Japanese. If in Japanese, translate to English. Return ONLY a JSON object with these fields: "original", "translated", "romanji" (romanized Japanese if translating to Japanese), "context" (a very brief usage tip, max 10 words). No markdown, no backticks, just raw JSON.',
-          },
+          { role: "system", content: 'You are a Japanese-English translator for a tourist. Translate the given text. If English→Japanese, if Japanese→English. Return ONLY JSON: {"original","translated","romanji","context"}. No markdown.' },
           { role: "user", content: text },
         ],
         temperature: 0.3,
       }),
     });
-
     const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || "OpenAI error" });
-    }
-
+    if (!response.ok) return res.status(response.status).json({ error: data.error?.message });
     const raw = data.choices[0].message.content.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(raw);
-    return res.status(200).json(parsed);
+    return res.status(200).json(JSON.parse(raw));
   } catch (err) {
     return res.status(500).json({ error: "Translation failed", detail: err.message });
   }
