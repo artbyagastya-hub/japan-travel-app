@@ -69,6 +69,77 @@ async function callVision(base64, prompt) {
   } catch { return "Could not process image. Check connection."; }
 }
 
+// ━━━ AI CHAT (separate from translation) ━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function callChat(messages, { max_tokens = 800 } = {}) {
+  // Try /api/chat proxy (Vercel)
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, max_tokens }),
+    });
+    if (res.ok) { const d = await res.json(); return d.content || ""; }
+  } catch {}
+  // Direct OpenAI with key
+  if (typeof window !== "undefined" && window.__OPENAI_KEY) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${window.__OPENAI_KEY}` },
+        body: JSON.stringify({ model: "gpt-4o-mini", max_tokens, messages, temperature: 0.7 }),
+      });
+      if (res.ok) { const d = await res.json(); return d.choices?.[0]?.message?.content || ""; }
+    } catch {}
+  }
+  // Anthropic fallback
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514", max_tokens,
+        messages: [{ role: "user", content: messages.map(m => `${m.role}: ${m.content}`).join("\n") }],
+      }),
+    });
+    const d = await res.json();
+    return d.content?.map(c => c.text || "").join("") || "";
+  } catch { return null; }
+}
+
+function buildSystemPrompt(dailyPlans, expenses = []) {
+  const totalSpent = expenses.reduce((s, e) => s + (e.a || 0), 0);
+  const plansStr = dailyPlans.map((d, i) =>
+    `[${i}] ${d.date} (${d.city}): "${d.title}"\n${d.stops.map(s => `   ${s.time} ${s.icon} ${s.name} — ${s.tip}`).join("\n")}`
+  ).join("\n\n");
+  return `You are an expert Japan travel assistant for this specific trip:
+
+TRIP OVERVIEW:
+• Flight out: TG 682, Bangkok (BKK) → Tokyo Haneda (HND), Feb 19 22:45 → Feb 20 06:55+1
+• Flight home: TG 683, Tokyo Haneda → Bangkok, Feb 27 10:35 → 15:40 (check out by 11AM!)
+• Kyoto stay: Feb 20–22, The OneFive Kyoto Shijo (Shijo-dori Horikawa, 3 min to Omiya Stn, 7-Eleven in lobby)
+• Tokyo stay: Feb 22–27, the b asakusa (Nishi-Asakusa 3-16-12, 1 min Tsukuba Express, 400m from Senso-ji, 7-Eleven across street)
+
+BUDGET: ¥${totalSpent.toLocaleString()} spent so far${totalSpent > 0 ? ` (≈ $${(totalSpent * 0.0067).toFixed(0)})` : ""}
+
+TRAVELER INTERESTS: Whiskey bars, vinyl/music bars, sushi & Japanese food, culture & history. Budget-conscious but willing to splurge on experiences.
+
+CURRENT DAILY PLANS (0-indexed):
+${plansStr}
+
+YOUR CAPABILITIES — respond naturally but also:
+
+1. TRAVEL ADVICE: Restaurant recs near hotels, transit directions, etiquette, packing tips
+2. TRANSLATION: Japanese phrases with romaji. How to say things.
+3. BUDGET ADVICE: Where to save vs splurge, konbini hacks, budget meal spots  
+4. REPLANNING: When asked to replan/modify a day, think through a better schedule. Always end with a fenced JSON block:
+\`\`\`json
+{"action":"replan","dayIndex":N,"dayTitle":"Short Day Title","stops":[{"time":"HH:MM","name":"Place Name","tip":"Insider tip here","icon":"emoji"}]}
+\`\`\`
+Use the 0-based dayIndex from the plan list above (0=Feb21, 1=Feb22, 2=Feb23, 3=Feb24, 4=Feb25, 5=Feb26).
+5. RECOMMENDATIONS: Personalized to their hotel location and interests. Be specific with names & tips.
+
+Keep responses concise and friendly (max 200 words unless replanning). Include Japanese phrases when relevant. 🇯🇵`;
+}
+
 // ━━━ DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const FLIGHTS = {
   outbound: { flight:"TG 682",airline:"Thai Airways",aircraft:"Boeing 777-300ER",date:"Feb 19 (Thu)",route:"Bangkok (BKK) → Tokyo Haneda (HND)",depart:"22:45",arrive:"06:55 +1",arriveDate:"Feb 20 (Fri)",terminal:{depart:"Suvarnabhumi",arrive:"Haneda T3"},duration:"6h 10m",distance:"4,589 km",codeshare:"NH5598 / LY8433",onTime:"70%",avgDelay:"20 min" },
@@ -325,16 +396,91 @@ function TripTab(){
     </div>))}
   </div>);}
 
-function PlannerTab(){
-  const [di,setDi]=useState(0);const d=DAILY_PLANS[di];
+function PlannerTab({dailyPlans,setDailyPlans}){
+  const [di,setDi]=useState(0);
+  const [aiOpen,setAiOpen]=useState(false);
+  const [aiInput,setAiInput]=useState("");
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiResponse,setAiResponse]=useState(null);
+  const [pendingPlan,setPendingPlan]=useState(null);
+  const d=dailyPlans[di];
+
+  const askAI=async()=>{
+    if(!aiInput.trim()||aiLoading)return;
+    setAiLoading(true);setAiResponse(null);setPendingPlan(null);
+    try{
+      const stopsStr=d.stops.map(s=>`${s.time} ${s.icon} ${s.name}: ${s.tip}`).join("\n");
+      const systemMsg={role:"system",content:`You are a Japan travel day planner. The user wants to modify their itinerary for ${d.date} in ${d.city}.
+
+Current plan "${d.title}":
+${stopsStr}
+
+When replanning, give a brief friendly explanation of the changes, then end with this exact JSON block:
+\`\`\`json
+{"action":"replan","dayTitle":"Short Title","stops":[{"time":"HH:MM","name":"Place","tip":"Insider tip","icon":"emoji"}]}
+\`\`\`
+For general questions, just answer helpfully. Keep responses under 160 words.`};
+      const text=await callChat([systemMsg,{role:"user",content:aiInput}],{max_tokens:600});
+      const jsonMatch=text?.match(/```json\n([\s\S]*?)\n```/);
+      if(jsonMatch){try{const p=JSON.parse(jsonMatch[1]);if(p.action==="replan")setPendingPlan(p);}catch{}}
+      setAiResponse(text?.replace(/```json[\s\S]*?```/g,"").trim()||"");
+    }catch{setAiResponse("Couldn't connect. Please try again.");}
+    setAiLoading(false);
+  };
+
+  const applyPlan=()=>{
+    if(!pendingPlan)return;
+    setDailyPlans(prev=>prev.map((plan,i)=>i===di?{...plan,title:pendingPlan.dayTitle||plan.title,stops:pendingPlan.stops}:plan));
+    setPendingPlan(null);setAiResponse(null);setAiInput("");setAiOpen(false);
+  };
+
+  const QUICK_PROMPTS=["Make it more relaxed","Add a great lunch spot","Rearrange for less walking","What's nearby I'm missing?"];
+
   return(<div style={{padding:"12px 16px 100px"}}>
     <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>📅 Daily Planner</h2>
+
+    {/* Day tabs */}
     <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
-      {DAILY_PLANS.map((p,i)=>(<button key={i} onClick={()=>setDi(i)} style={{padding:"6px 12px",borderRadius:10,border:"none",cursor:"pointer",
+      {dailyPlans.map((p,i)=>(<button key={i} onClick={()=>{setDi(i);setAiOpen(false);setAiResponse(null);setPendingPlan(null);}} style={{padding:"6px 12px",borderRadius:10,border:"none",cursor:"pointer",
         background:di===i?"rgba(247,118,142,0.2)":"rgba(255,255,255,0.04)",color:di===i?"#f7768e":"#7982a9",fontSize:11,fontWeight:600,whiteSpace:"nowrap",flexShrink:0}}>
         {p.date.split(" ")[0]} {p.date.split(" ")[1]}</button>))}</div>
-    <div style={{background:"rgba(122,162,247,0.06)",borderRadius:12,padding:14,marginBottom:14,border:"1px solid rgba(122,162,247,0.12)"}}>
-      <div style={{fontSize:15,fontWeight:600,color:"#c0caf5"}}>{d.title}</div><div style={{fontSize:12,color:"#7aa2f7",marginTop:2}}>{d.date} • {d.city}</div></div>
+
+    {/* Day header with AI button */}
+    <div style={{background:"rgba(122,162,247,0.06)",borderRadius:12,padding:14,marginBottom:14,border:"1px solid rgba(122,162,247,0.12)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div><div style={{fontSize:15,fontWeight:600,color:"#c0caf5"}}>{d.title}</div>
+        <div style={{fontSize:12,color:"#7aa2f7",marginTop:2}}>{d.date} • {d.city}</div></div>
+      <button onClick={()=>setAiOpen(!aiOpen)} style={{padding:"7px 13px",borderRadius:9,border:"1px solid rgba(187,154,247,0.25)",
+        background:aiOpen?"rgba(187,154,247,0.2)":"rgba(187,154,247,0.08)",color:"#bb9af7",fontSize:12,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
+        ✨ AI Replan</button></div>
+
+    {/* AI Panel */}
+    {aiOpen&&(<div style={{background:"rgba(187,154,247,0.05)",borderRadius:12,padding:14,marginBottom:14,border:"1px solid rgba(187,154,247,0.18)"}}>
+      <div style={{fontSize:12,color:"#bb9af7",fontWeight:600,marginBottom:6}}>✨ AI Day Planner</div>
+      <div style={{fontSize:11,color:"#7982a9",marginBottom:10,lineHeight:1.5}}>Tell me how to change this day — swap places, add food stops, adjust for energy level, anything.</div>
+      <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
+        {QUICK_PROMPTS.map((q,i)=>(<button key={i} onClick={()=>setAiInput(q)} style={{padding:"4px 10px",borderRadius:16,
+          border:"1px solid rgba(187,154,247,0.2)",background:"rgba(187,154,247,0.06)",color:"#bb9af7",fontSize:10,cursor:"pointer"}}>{q}</button>))}</div>
+      <div style={{display:"flex",gap:8}}>
+        <input value={aiInput} onChange={e=>setAiInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&askAI()}
+          placeholder="How should I change this day?"
+          style={{flex:1,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(187,154,247,0.2)",background:"rgba(0,0,0,0.3)",color:"#c0caf5",fontSize:13,outline:"none"}}/>
+        <button onClick={askAI} disabled={aiLoading} style={{padding:"0 16px",borderRadius:10,border:"none",cursor:"pointer",
+          background:"rgba(187,154,247,0.2)",color:"#bb9af7",fontSize:15,fontWeight:700}}>{aiLoading?"⏳":"→"}</button></div>
+
+      {aiResponse&&(<div style={{marginTop:12,padding:12,background:"rgba(0,0,0,0.25)",borderRadius:10,border:"1px solid rgba(255,255,255,0.06)"}}>
+        <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{aiResponse}</div>
+        {pendingPlan&&(<div style={{marginTop:12}}>
+          <div style={{fontSize:11,color:"#bb9af7",fontWeight:600,marginBottom:8}}>✨ New plan: "{pendingPlan.dayTitle}"</div>
+          {pendingPlan.stops?.map((s,i)=>(<div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:5,padding:"6px 8px",borderRadius:7,background:"rgba(187,154,247,0.07)"}}>
+            <span style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",width:42,flexShrink:0}}>{s.time}</span>
+            <span style={{fontSize:14}}>{s.icon}</span>
+            <div style={{flex:1}}><div style={{fontSize:12,color:"#c0caf5"}}>{s.name}</div>
+              <div style={{fontSize:10,color:"#e0af68",marginTop:1}}>{s.tip}</div></div></div>))}
+          <button onClick={applyPlan} style={{marginTop:10,width:"100%",padding:"10px",borderRadius:10,border:"none",cursor:"pointer",
+            background:"linear-gradient(135deg,rgba(187,154,247,0.3),rgba(122,162,247,0.2))",color:"#bb9af7",fontSize:13,fontWeight:700}}>
+            ✅ Apply This Plan</button></div>)}</div>)}</div>)}
+
+    {/* Timeline */}
     {d.stops.map((s,i)=>(<div key={i} style={{display:"flex",gap:10,marginBottom:4}}>
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:45,flexShrink:0}}>
         <div style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",fontWeight:600}}>{s.time}</div>
@@ -725,43 +871,138 @@ function ExpenseTab(){
     {ex.length===0&&<div style={{textAlign:"center",padding:30,color:"#565f89",fontSize:13}}>No expenses yet</div>}
   </div>);}
 
-// ━━━ AI CHAT TAB (OpenAI) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function ChatTab(){
-  const [msgs,setMsgs]=useState([{role:"assistant",content:"こんにちは! I'm your Japan travel AI. Ask me anything — restaurants, directions, cultural tips, or language help! 🇯🇵"}]);
-  const [input,setInput]=useState("");const [loading,setLoading]=useState(false);const endRef=useRef(null);
-  useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
-  const send=async()=>{
-    if(!input.trim()||loading)return;const userMsg=input.trim();setInput("");
-    setMsgs(p=>[...p,{role:"user",content:userMsg}]);setLoading(true);
+// ━━━ AI ASSISTANT TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ChatTab({dailyPlans,setDailyPlans,expenses}){
+  const WELCOME=`こんにちは！ I'm your Japan AI travel assistant 🇯🇵
+
+I know your full itinerary, hotels, budget, and interests. Ask me anything:
+• "Replan Feb 24 — I'm exhausted"
+• "Best ramen near Asakusa under ¥1,500?"
+• "How do I say 'table for two' in Japanese?"
+• "Is teamLab worth ¥3,800?"
+• "What should I do tonight in Tokyo?"`;
+  const [msgs,setMsgs]=useState([{role:"assistant",content:WELCOME}]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [pendingPlan,setPendingPlan]=useState(null);
+  const endRef=useRef(null);
+
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[msgs,pendingPlan]);
+
+  const QUICK_Q=[
+    {label:"🍜 Ramen near hotel",q:"What's the best ramen near my hotel right now?"},
+    {label:"🔄 Replan a day",q:"I'm tired on Feb 25 — can you make it more relaxed?"},
+    {label:"🚇 Subway help",q:"How do I get from Asakusa to Shibuya on the subway?"},
+    {label:"🥃 Whiskey bar tonight",q:"Which whiskey bar should I hit tonight in Tokyo?"},
+    {label:"💴 Save money",q:"What are the best budget meals near Asakusa?"},
+    {label:"🗣️ Phrase help",q:"How do I say 'table for two, non-smoking' in Japanese?"},
+  ];
+
+  const send=async(overrideText)=>{
+    const userMsg=(overrideText||input).trim();
+    if(!userMsg||loading)return;
+    setInput("");setPendingPlan(null);
+    setMsgs(p=>[...p,{role:"user",content:userMsg}]);
+    setLoading(true);
     try{
-      const sysMsg={role:"system",content:`You are a helpful Japan travel assistant for someone visiting Kyoto (Feb 20-22) and Tokyo (Feb 22-27, 2026). Hotels: The OneFive Kyoto Shijo and the b asakusa in Tokyo. Flights: TG 682 BKK→HND Feb 19, TG 683 HND→BKK Feb 27. Be concise, practical, friendly. Include Japanese phrases when helpful. Max 150 words.`};
-      const history=msgs.slice(-6).map(m=>({role:m.role,content:m.content}));
-      const text=await callOpenAI([sysMsg,...history,{role:"user",content:userMsg}]);
-      setMsgs(p=>[...p,{role:"assistant",content:text||"Sorry, couldn't connect. Try again."}]);
-    }catch{setMsgs(p=>[...p,{role:"assistant",content:"Connection error. Check internet."}]);}
+      const sysMsg={role:"system",content:buildSystemPrompt(dailyPlans,expenses||[])};
+      const history=msgs.slice(-10).map(m=>({role:m.role,content:m.content}));
+      const text=await callChat([sysMsg,...history,{role:"user",content:userMsg}],{max_tokens:700});
+
+      // Extract JSON replan if present
+      const jsonMatch=text?.match(/```json\n([\s\S]*?)\n```/);
+      if(jsonMatch){
+        try{
+          const parsed=JSON.parse(jsonMatch[1]);
+          if(parsed.action==="replan")setPendingPlan(parsed);
+        }catch{}
+      }
+      const cleanText=text?.replace(/```json[\s\S]*?```/g,"").trim();
+      setMsgs(p=>[...p,{role:"assistant",content:cleanText||"Sorry, couldn't respond. Try again."}]);
+    }catch{
+      setMsgs(p=>[...p,{role:"assistant",content:"Connection error. Check your internet."}]);
+    }
     setLoading(false);
   };
-  const quickQ=["Best ramen near my hotel?","How to use the subway?","What should I do tonight?","Translate: Where is the exit?"];
+
+  const applyPlan=(plan)=>{
+    const idx=plan?.dayIndex;
+    if(idx==null||idx<0||idx>=dailyPlans.length){
+      setMsgs(p=>[...p,{role:"assistant",content:"I couldn't figure out which day to apply this to. Try asking to replan a specific date like 'Replan Feb 24'."}]);
+      setPendingPlan(null);return;
+    }
+    setDailyPlans(prev=>prev.map((d,i)=>i===idx?{...d,title:plan.dayTitle||d.title,stops:plan.stops}:d));
+    setMsgs(p=>[...p,{role:"assistant",content:`✅ Done! ${dailyPlans[idx]?.date} has been updated to "${plan.dayTitle}". Head to the 📅 Plan tab to see it.`}]);
+    setPendingPlan(null);
+  };
+
+  const isUser=role=>role==="user";
+
   return(<div style={{padding:"12px 16px 100px",display:"flex",flexDirection:"column",height:"calc(100vh - 140px)"}}>
-    <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>🤖 Japan AI (OpenAI)</h2>
-    {msgs.length<=1&&(<div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-      {quickQ.map((q,i)=>(<button key={i} onClick={()=>setInput(q)} style={{padding:"6px 12px",borderRadius:20,border:"1px solid rgba(122,162,247,0.15)",
-        background:"rgba(122,162,247,0.06)",color:"#7aa2f7",fontSize:11,cursor:"pointer"}}>{q}</button>))}</div>)}
+    {/* Header */}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400}}>🤖 Japan AI Assistant</h2>
+      {msgs.length>1&&<button onClick={()=>{setMsgs([{role:"assistant",content:WELCOME}]);setPendingPlan(null);}}
+        style={{padding:"4px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",
+          color:"#565f89",fontSize:11,cursor:"pointer"}}>↺ Reset</button>}</div>
+
+    {/* Quick questions (shown only at start) */}
+    {msgs.length<=1&&(<div style={{marginBottom:14}}>
+      <div style={{fontSize:11,color:"#565f89",marginBottom:8}}>Try asking:</div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {QUICK_Q.map((q,i)=>(<button key={i} onClick={()=>send(q.q)}
+          style={{padding:"7px 13px",borderRadius:20,border:"1px solid rgba(122,162,247,0.15)",
+            background:"rgba(122,162,247,0.06)",color:"#7aa2f7",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>
+          {q.label}</button>))}</div></div>)}
+
+    {/* Messages */}
     <div style={{flex:1,overflowY:"auto",marginBottom:12,display:"flex",flexDirection:"column",gap:8}}>
-      {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
-        <div style={{maxWidth:"85%",padding:"10px 14px",borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
-          background:m.role==="user"?"rgba(122,162,247,0.15)":"rgba(255,255,255,0.04)",
-          border:`1px solid ${m.role==="user"?"rgba(122,162,247,0.2)":"rgba(255,255,255,0.06)"}`,
-          fontSize:13,color:m.role==="user"?"#c0caf5":"#9aa5ce",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div></div>))}
-      {loading&&<div style={{display:"flex",justifyContent:"flex-start"}}><div style={{padding:"10px 14px",borderRadius:"14px 14px 14px 4px",
-        background:"rgba(255,255,255,0.04)",fontSize:13,color:"#565f89"}}>Thinking...</div></div>}
+      {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:isUser(m.role)?"flex-end":"flex-start"}}>
+        <div style={{maxWidth:"88%",padding:"10px 14px",
+          borderRadius:isUser(m.role)?"14px 14px 4px 14px":"14px 14px 14px 4px",
+          background:isUser(m.role)?"rgba(122,162,247,0.15)":"rgba(255,255,255,0.04)",
+          border:`1px solid ${isUser(m.role)?"rgba(122,162,247,0.2)":"rgba(255,255,255,0.06)"}`,
+          fontSize:13,color:isUser(m.role)?"#c0caf5":"#9aa5ce",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
+          {m.content}</div></div>))}
+
+      {/* Pending replan card */}
+      {pendingPlan&&!loading&&(
+        <div style={{maxWidth:"88%",padding:14,borderRadius:12,background:"rgba(187,154,247,0.07)",border:"1px solid rgba(187,154,247,0.22)"}}>
+          <div style={{fontSize:12,color:"#bb9af7",fontWeight:700,marginBottom:10}}>
+            ✨ Suggested: "{pendingPlan.dayTitle}"
+            {pendingPlan.dayIndex>=0&&pendingPlan.dayIndex<dailyPlans.length&&
+              <span style={{fontWeight:400,color:"#9aa5ce"}}> · {dailyPlans[pendingPlan.dayIndex]?.date}</span>}
+          </div>
+          {pendingPlan.stops?.map((s,i)=>(<div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:6,padding:"6px 8px",borderRadius:7,background:"rgba(187,154,247,0.07)"}}>
+            <span style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",width:42,flexShrink:0,paddingTop:1}}>{s.time}</span>
+            <span style={{fontSize:15,flexShrink:0}}>{s.icon}</span>
+            <div><div style={{fontSize:12,color:"#c0caf5",fontWeight:500}}>{s.name}</div>
+              <div style={{fontSize:10,color:"#e0af68",marginTop:1}}>{s.tip}</div></div></div>))}
+          <div style={{display:"flex",gap:8,marginTop:10}}>
+            {pendingPlan.dayIndex>=0&&pendingPlan.dayIndex<dailyPlans.length&&(
+              <button onClick={()=>applyPlan(pendingPlan)} style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+                background:"rgba(187,154,247,0.25)",color:"#bb9af7",fontSize:12,fontWeight:700}}>
+                ✅ Apply to Planner</button>)}
+            <button onClick={()=>setPendingPlan(null)} style={{padding:"9px 14px",borderRadius:9,border:"1px solid rgba(255,255,255,0.08)",
+              background:"transparent",color:"#565f89",fontSize:12,cursor:"pointer"}}>Dismiss</button>
+          </div></div>)}
+
+      {loading&&(<div style={{display:"flex",justifyContent:"flex-start"}}>
+        <div style={{padding:"10px 16px",borderRadius:"14px 14px 14px 4px",background:"rgba(255,255,255,0.04)",fontSize:13,color:"#565f89",display:"flex",gap:6,alignItems:"center"}}>
+          <span style={{animation:"pulse 1s infinite",display:"inline-block"}}>●</span>
+          <span style={{animation:"pulse 1s infinite 0.2s",display:"inline-block"}}>●</span>
+          <span style={{animation:"pulse 1s infinite 0.4s",display:"inline-block"}}>●</span>
+        </div></div>)}
       <div ref={endRef}/></div>
+
+    {/* Input */}
     <div style={{display:"flex",gap:8,position:"sticky",bottom:70}}>
       <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}
-        placeholder="Ask anything about Japan..." style={{flex:1,padding:"12px 14px",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
-        background:"rgba(0,0,0,0.3)",color:"#c0caf5",fontSize:14,outline:"none"}}/>
-      <button onClick={send} disabled={loading} style={{padding:"0 20px",borderRadius:12,border:"none",cursor:"pointer",
-        background:loading?"rgba(122,162,247,0.1)":"rgba(122,162,247,0.2)",color:"#7aa2f7",fontSize:16,fontWeight:700}}>
+        placeholder="Ask anything — replan days, food, phrases, transit..."
+        style={{flex:1,padding:"12px 14px",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(0,0,0,0.35)",color:"#c0caf5",fontSize:14,outline:"none"}}/>
+      <button onClick={()=>send()} disabled={loading} style={{padding:"0 20px",borderRadius:12,border:"none",cursor:"pointer",
+        background:loading?"rgba(122,162,247,0.08)":"rgba(122,162,247,0.2)",color:"#7aa2f7",fontSize:16,fontWeight:700}}>
         {loading?"⏳":"→"}</button></div>
   </div>);}
 
@@ -794,6 +1035,12 @@ function SOSTab(){return(<div style={{padding:"12px 16px 100px"}}>
 // ━━━ MAIN APP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export default function JapanTravelAssistant(){
   const [tab,setTab]=useState("trip");
+  const [dailyPlans,setDailyPlans]=useState(DAILY_PLANS);
+  const [expenses,setExpenses]=useState([]);
+
+  // Keep expenses in sync for AI budget context
+  useEffect(()=>{storage.get("japan-expenses").then(d=>{if(d)setExpenses(d);});},[tab]);
+
   return(<div style={{minHeight:"100vh",background:"#1a1a2e",color:"#c0caf5",fontFamily:"'Noto Sans JP', -apple-system, sans-serif",maxWidth:480,margin:"0 auto",position:"relative"}}>
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Noto+Serif+JP:wght@400;600&display=swap');
@@ -803,7 +1050,7 @@ export default function JapanTravelAssistant(){
     `}</style>
     <Header/>
     {tab==="trip"&&<TripTab/>}
-    {tab==="planner"&&<PlannerTab/>}
+    {tab==="planner"&&<PlannerTab dailyPlans={dailyPlans} setDailyPlans={setDailyPlans}/>}
     {tab==="translate"&&<TranslateTab/>}
     {tab==="camera"&&<CameraTab/>}
     {tab==="explore"&&<ExploreTab/>}
@@ -811,7 +1058,7 @@ export default function JapanTravelAssistant(){
     {tab==="places"&&<PlacesTab/>}
     {tab==="pack"&&<PackTab/>}
     {tab==="expense"&&<ExpenseTab/>}
-    {tab==="chat"&&<ChatTab/>}
+    {tab==="chat"&&<ChatTab dailyPlans={dailyPlans} setDailyPlans={setDailyPlans} expenses={expenses}/>}
     {tab==="sos"&&<SOSTab/>}
     <TabBar active={tab} setActive={setTab}/>
   </div>);}
