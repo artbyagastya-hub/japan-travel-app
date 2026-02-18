@@ -1,32 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-// ━━━ CONFIG ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// For self-hosted: set your OpenAI key in env, use a proxy. 
-// For Claude.ai artifact: calls go through Anthropic's endpoint.
 const OPENAI_MODEL = "gpt-4o-mini";
 const OPENAI_VISION_MODEL = "gpt-4o";
 
 async function callOpenAI(messages, { model = OPENAI_MODEL, max_tokens = 1000 } = {}) {
-  // Try OpenAI proxy first (self-hosted), fall back to direct (needs key in env)
-  const endpoints = ["/api/translate", "https://api.openai.com/v1/chat/completions"];
-  for (const url of endpoints) {
-    try {
-      const isProxy = url.startsWith("/");
-      const headers = { "Content-Type": "application/json" };
-      if (!isProxy && typeof window !== "undefined" && window.__OPENAI_KEY) {
-        headers["Authorization"] = `Bearer ${window.__OPENAI_KEY}`;
-      }
-      const body = isProxy
-        ? JSON.stringify({ text: messages[messages.length - 1].content })
-        : JSON.stringify({ model, max_tokens, messages, temperature: 0.3 });
-      const res = await fetch(url, { method: "POST", headers, body });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (isProxy) return JSON.stringify(data);
-      return data.choices?.[0]?.message?.content || "";
-    } catch { continue; }
-  }
-  // Fallback: use Anthropic API (works inside Claude.ai artifacts)
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -38,11 +15,26 @@ async function callOpenAI(messages, { model = OPENAI_MODEL, max_tokens = 1000 } 
 }
 
 async function callVision(base64, prompt) {
-  // Try OpenAI Vision
+  // Try Anthropic Vision first
   try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514", max_tokens: 1000,
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+          { type: "text", text: prompt }
+        ]}]
+      })
+    });
+    if (res.ok) { const d = await res.json(); return d.content?.map(c => c.text || "").join("") || ""; }
+  } catch {}
+  // Fallback: OpenAI Vision
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (typeof window !== "undefined" && window.__OPENAI_KEY) headers["Authorization"] = `Bearer ${window.__OPENAI_KEY}`;
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(window.__OPENAI_KEY ? { Authorization: `Bearer ${window.__OPENAI_KEY}` } : {}) },
+      method: "POST", headers,
       body: JSON.stringify({
         model: OPENAI_VISION_MODEL, max_tokens: 1000,
         messages: [{ role: "user", content: [
@@ -53,34 +45,17 @@ async function callVision(base64, prompt) {
     });
     if (res.ok) { const d = await res.json(); return d.choices?.[0]?.message?.content || ""; }
   } catch {}
-  // Fallback: Anthropic Vision
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000,
-        messages: [{ role: "user", content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-          { type: "text", text: prompt }
-        ]}]
-      })
-    });
-    const d = await res.json();
-    return d.content?.map(c => c.text || "").join("") || "";
-  } catch { return "Could not process image. Check connection."; }
+  return null;
 }
 
-// ━━━ AI CHAT (separate from translation) ━━━━━━━━━━━━━━━━━━━━━━━━━━
 async function callChat(messages, { max_tokens = 800 } = {}) {
-  // Try /api/chat proxy (Vercel)
   try {
     const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens }),
     });
     if (res.ok) { const d = await res.json(); return d.content || ""; }
   } catch {}
-  // Direct OpenAI with key
   if (typeof window !== "undefined" && window.__OPENAI_KEY) {
     try {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -91,7 +66,6 @@ async function callChat(messages, { max_tokens = 800 } = {}) {
       if (res.ok) { const d = await res.json(); return d.choices?.[0]?.message?.content || ""; }
     } catch {}
   }
-  // Anthropic fallback
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -108,7 +82,7 @@ async function callChat(messages, { max_tokens = 800 } = {}) {
 function buildSystemPrompt(dailyPlans, expenses = []) {
   const totalSpent = expenses.reduce((s, e) => s + (e.a || 0), 0);
   const plansStr = dailyPlans.map((d, i) =>
-    `[${i}] ${d.date} (${d.city}): "${d.title}"\n${d.stops.map(s => `   ${s.time} ${s.icon} ${s.name} — ${s.tip}`).join("\n")}`
+    `[${i}] ${d.date} (${d.city}): "${d.title}"\n${d.stops.map(s => `   ${s.time} ${s.icon} ${s.name} – ${s.tip}`).join("\n")}`
   ).join("\n\n");
   return `You are an expert Japan travel assistant for this specific trip:
 
@@ -125,11 +99,11 @@ TRAVELER INTERESTS: Whiskey bars, vinyl/music bars, sushi & Japanese food, cultu
 CURRENT DAILY PLANS (0-indexed):
 ${plansStr}
 
-YOUR CAPABILITIES — respond naturally but also:
+YOUR CAPABILITIES – respond naturally but also:
 
 1. TRAVEL ADVICE: Restaurant recs near hotels, transit directions, etiquette, packing tips
 2. TRANSLATION: Japanese phrases with romaji. How to say things.
-3. BUDGET ADVICE: Where to save vs splurge, konbini hacks, budget meal spots  
+3. BUDGET ADVICE: Where to save vs splurge, konbini hacks, budget meal spots
 4. REPLANNING: When asked to replan/modify a day, think through a better schedule. Always end with a fenced JSON block:
 \`\`\`json
 {"action":"replan","dayIndex":N,"dayTitle":"Short Day Title","stops":[{"time":"HH:MM","name":"Place Name","tip":"Insider tip here","icon":"emoji"}]}
@@ -140,7 +114,7 @@ Use the 0-based dayIndex from the plan list above (0=Feb21, 1=Feb22, 2=Feb23, 3=
 Keep responses concise and friendly (max 200 words unless replanning). Include Japanese phrases when relevant. 🇯🇵`;
 }
 
-// ━━━ DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── DATA ─────────────────────────────────────────────────────────────────────
 const FLIGHTS = {
   outbound: { flight:"TG 682",airline:"Thai Airways",aircraft:"Boeing 777-300ER",date:"Feb 19 (Thu)",route:"Bangkok (BKK) → Tokyo Haneda (HND)",depart:"22:45",arrive:"06:55 +1",arriveDate:"Feb 20 (Fri)",terminal:{depart:"Suvarnabhumi",arrive:"Haneda T3"},duration:"6h 10m",distance:"4,589 km",codeshare:"NH5598 / LY8433",onTime:"70%",avgDelay:"20 min" },
   return: { flight:"TG 683",airline:"Thai Airways",aircraft:"Boeing 777-300ER",date:"Feb 27 (Fri)",route:"Tokyo Haneda (HND) → Bangkok (BKK)",depart:"10:35",arrive:"15:40",arriveDate:"Feb 27 (Fri)",terminal:{depart:"Haneda T3",arrive:"Suvarnabhumi T1"},duration:"7h 05m",distance:"4,589 km",codeshare:"NH5599 / LY8434",onTime:"84%",avgDelay:"17 min" }
@@ -166,15 +140,15 @@ const PHRASES = [
   {en:"Hello",ja:"こんにちは",rom:"Konnichiwa",cat:"basics"},{en:"Thank you",ja:"ありがとうございます",rom:"Arigatou gozaimasu",cat:"basics"},
   {en:"Excuse me",ja:"すみません",rom:"Sumimasen",cat:"basics"},{en:"Sorry",ja:"ごめんなさい",rom:"Gomen nasai",cat:"basics"},
   {en:"Yes / No",ja:"はい / いいえ",rom:"Hai / Iie",cat:"basics"},{en:"I don't understand",ja:"わかりません",rom:"Wakarimasen",cat:"basics"},
-  {en:"Do you speak English?",ja:"英語を話せますか？",rom:"Eigo o hanasemasu ka?",cat:"basics"},{en:"Please",ja:"お願いします",rom:"Onegaishimasu",cat:"basics"},
+  {en:"Do you speak English?",ja:"英語を話せますか？",rom:"Eigo o hanasemasu ka?",cat:"basics"},{en:"Please",ja:"おねがいします",rom:"Onegaishimasu",cat:"basics"},
   {en:"Good morning",ja:"おはようございます",rom:"Ohayou gozaimasu",cat:"basics"},{en:"Goodbye",ja:"さようなら",rom:"Sayounara",cat:"basics"},
   {en:"How much?",ja:"いくらですか？",rom:"Ikura desu ka?",cat:"shopping"},{en:"Too expensive",ja:"高すぎます",rom:"Takasugimasu",cat:"shopping"},
   {en:"I'll take this",ja:"これをください",rom:"Kore o kudasai",cat:"shopping"},{en:"Where is the toilet?",ja:"トイレはどこですか？",rom:"Toire wa doko desu ka?",cat:"navigate"},
-  {en:"Where is the station?",ja:"駅はどこですか？",rom:"Eki wa doko desu ka?",cat:"navigate"},{en:"Please take me to…",ja:"…まで お願いします",rom:"...made onegaishimasu",cat:"navigate"},
+  {en:"Where is the station?",ja:"駅はどこですか？",rom:"Eki wa doko desu ka?",cat:"navigate"},{en:"Please take me to…",ja:"…まで おねがいします",rom:"...made onegaishimasu",cat:"navigate"},
   {en:"I'm lost",ja:"迷いました",rom:"Mayoimashita",cat:"navigate"},{en:"Where is the trash can?",ja:"ゴミ箱はどこですか？",rom:"Gomibako wa doko desu ka?",cat:"navigate"},
   {en:"Menu, please",ja:"メニューをください",rom:"Menyuu o kudasai",cat:"food"},{en:"Water, please",ja:"お水をください",rom:"Omizu o kudasai",cat:"food"},
-  {en:"The bill, please",ja:"お会計お願いします",rom:"Okaikei onegaishimasu",cat:"food"},{en:"Delicious!",ja:"おいしい！",rom:"Oishii!",cat:"food"},
-  {en:"No meat please",ja:"肉なしでお願いします",rom:"Niku nashi de onegaishimasu",cat:"food"},{en:"I have an allergy",ja:"アレルギーがあります",rom:"Arerugii ga arimasu",cat:"food"},
+  {en:"The bill, please",ja:"お会計おねがいします",rom:"Okaikei onegaishimasu",cat:"food"},{en:"Delicious!",ja:"おいしい！",rom:"Oishii!",cat:"food"},
+  {en:"No meat please",ja:"肉なしでおねがいします",rom:"Niku nashi de onegaishimasu",cat:"food"},{en:"I have an allergy",ja:"アレルギーがあります",rom:"Arerugii ga arimasu",cat:"food"},
   {en:"Cheers!",ja:"乾杯！",rom:"Kanpai!",cat:"food"},{en:"Help!",ja:"助けて！",rom:"Tasukete!",cat:"emergency"},
   {en:"Call an ambulance",ja:"救急車を呼んでください",rom:"Kyuukyuusha o yonde kudasai",cat:"emergency"},{en:"I need a doctor",ja:"医者が必要です",rom:"Isha ga hitsuyou desu",cat:"emergency"},
   {en:"I feel sick",ja:"気分が悪いです",rom:"Kibun ga warui desu",cat:"emergency"},
@@ -196,7 +170,7 @@ const ETIQUETTE = [
 
 const EMERGENCY = [
   {icon:"🚑",label:"Ambulance/Fire",number:"119",note:"Free from any phone"},
-  {icon:"🚓",label:"Police",number:"110",note:"Free from any phone"},
+  {icon:"🚔",label:"Police",number:"110",note:"Free from any phone"},
   {icon:"🌐",label:"Japan Helpline (24h EN)",number:"0570-064-211",note:"Multilingual"},
   {icon:"🏥",label:"AMDA Medical (EN)",number:"03-6233-9266",note:"Doctor referrals"},
   {icon:"📱",label:"NHK World Disaster",number:null,note:"Earthquake/typhoon alerts",url:"https://www3.nhk.or.jp/nhkworld/en/news/"},
@@ -224,7 +198,7 @@ const SHOPPING = [
   {name:"Don Quijote (Donki)",icon:"🪩",area:"Everywhere",desc:"Tax-free souvenirs, snacks, electronics. Open 24h.",tip:"Passport for tax-free on ¥5,000+.",cat:"general"},
   {name:"Nakamise Street",icon:"🎎",area:"Asakusa",desc:"Traditional souvenirs, snacks. 400m from hotel!",tip:"Compare prices on side streets.",cat:"souvenirs"},
   {name:"Akihabara Electric Town",icon:"🎮",area:"Akihabara",desc:"Electronics, anime, manga, retro games.",tip:"Yodobashi Camera for electronics.",cat:"electronics"},
-  {name:"Nishiki Market",icon:"🍡",area:"Kyoto",desc:"400m covered market, 100+ food stalls.",tip:"Dashi tamago, mochi, matcha. Closes 5 PM.",cat:"food"},
+  {name:"Nishiki Market",icon:"🐡",area:"Kyoto",desc:"400m covered market, 100+ food stalls.",tip:"Dashi tamago, mochi, matcha. Closes 5 PM.",cat:"food"},
   {name:"Disk Union",icon:"🎵",area:"Shinjuku",desc:"Japan's best used records. Genre-specific stores.",tip:"Shinjuku branch excels in jazz.",cat:"entertainment"},
   {name:"Tower Records Shibuya",icon:"💿",area:"Shibuya",desc:"9-floor music store. Japan-exclusive vinyl.",tip:"Great for music lovers.",cat:"entertainment"},
 ];
@@ -234,7 +208,7 @@ const ATTRACTIONS = {
     {name:"Fushimi Inari",icon:"⛩️",hours:"24h",price:"Free",time:"1.5–2h",tip:"Go at dawn. Full hike 2-3 hours.",lat:34.9671,lng:135.7727,mustSee:true},
     {name:"Kinkaku-ji",icon:"🏯",hours:"9–17",price:"¥500",time:"45m",tip:"Best photos from pond.",lat:35.0394,lng:135.7292,mustSee:true},
     {name:"Arashiyama Bamboo",icon:"🎋",hours:"24h",price:"Free",time:"30m",tip:"Before 8 AM for no crowds.",lat:35.0095,lng:135.6722,mustSee:true},
-    {name:"Nishiki Market",icon:"🍡",hours:"9–17",price:"Free",time:"1–2h",tip:"Dashi tamago & mochi.",lat:35.0050,lng:135.7650},
+    {name:"Nishiki Market",icon:"🐡",hours:"9–17",price:"Free",time:"1–2h",tip:"Dashi tamago & mochi.",lat:35.0050,lng:135.7650},
     {name:"Kiyomizu-dera",icon:"🛕",hours:"6–18",price:"¥400",time:"1h",tip:"Wooden terrace = stunning views.",lat:34.9949,lng:135.7850,mustSee:true},
     {name:"Gion District",icon:"🎭",hours:"Evening",price:"Free",time:"1–2h",tip:"Hanamikoji at dusk for geisha.",lat:35.0037,lng:135.7756},
   ],
@@ -251,7 +225,7 @@ const ATTRACTIONS = {
 
 const DAILY_PLANS = [
   {date:"Feb 21 (Sat)",city:"Kyoto",title:"Temples & Markets",stops:[
-    {time:"6:00",name:"Fushimi Inari",tip:"Empty at dawn",icon:"⛩️"},{time:"9:00",name:"Nishiki Market",tip:"Dashi tamago, matcha",icon:"🍡"},
+    {time:"6:00",name:"Fushimi Inari",tip:"Empty at dawn",icon:"⛩️"},{time:"9:00",name:"Nishiki Market",tip:"Dashi tamago, matcha",icon:"🐡"},
     {time:"10:30",name:"Kiyomizu-dera",tip:"Walk Higashiyama up",icon:"🛕"},{time:"12:30",name:"Gion lunch",tip:"Teishoku ¥800-1,200",icon:"🍱"},
     {time:"14:00",name:"Kinkaku-ji",tip:"Less crowded PM",icon:"🏯"},{time:"18:00",name:"Pontocho dinner",tip:"Atmospheric alley",icon:"🍶"},
   ]},
@@ -294,7 +268,7 @@ const storage={
   async set(k,v){try{if(window.storage){await window.storage.set(k,JSON.stringify(v));return;}}catch{}try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
 };
 
-// ━━━ COMPONENTS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── COMPONENTS ───────────────────────────────────────────────────────────────
 function TabBar({active,setActive}){
   const tabs=[{id:"trip",icon:"📋",l:"Trip"},{id:"planner",icon:"📅",l:"Plan"},{id:"translate",icon:"🗣️",l:"Talk"},
     {id:"camera",icon:"📷",l:"Lens"},{id:"explore",icon:"🧭",l:"Explore"},{id:"nightlife",icon:"🌙",l:"Night"},
@@ -328,10 +302,10 @@ function Header(){
     {weather?.current&&(<div style={{marginTop:10,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
       <div style={{display:"flex",gap:4}}>{["tokyo","kyoto"].map(c=>(<button key={c} onClick={()=>setCity(c)} style={{padding:"2px 10px",borderRadius:12,border:"none",cursor:"pointer",
         background:city===c?"rgba(247,118,142,0.2)":"rgba(255,255,255,0.05)",color:city===c?"#f7768e":"#565f89",fontSize:11,textTransform:"capitalize"}}>{c}</button>))}</div>
-      <div style={{fontSize:13,color:"#c0caf5"}}>{WMO_CODES[weather.current.weather_code]||"—"} <span style={{fontWeight:700,color:"#fff"}}>{Math.round(weather.current.temperature_2m)}°C</span></div>
+      <div style={{fontSize:13,color:"#c0caf5"}}>{WMO_CODES[weather.current.weather_code]||"–"} <span style={{fontWeight:700,color:"#fff"}}>{Math.round(weather.current.temperature_2m)}°C</span></div>
       {weather.daily&&(<div style={{display:"flex",gap:8,marginLeft:"auto"}}>{weather.daily.time.slice(0,3).map((d,i)=>(<div key={i} style={{textAlign:"center",fontSize:10,color:"#7982a9"}}>
         <div>{new Date(d+"T00:00").toLocaleDateString("en",{weekday:"short"})}</div>
-        <div style={{fontSize:14}}>{(WMO_CODES[weather.daily.weather_code[i]]||"—").split(" ")[0]}</div>
+        <div style={{fontSize:14}}>{(WMO_CODES[weather.daily.weather_code[i]]||"–").split(" ")[0]}</div>
         <div style={{color:"#9aa5ce"}}>{Math.round(weather.daily.temperature_2m_min[i])}°/{Math.round(weather.daily.temperature_2m_max[i])}°</div></div>))}</div>)}
     </div>)}
   </div>);
@@ -375,7 +349,7 @@ function TripTab(){
       background:"linear-gradient(135deg, rgba(122,162,247,0.12), rgba(187,154,247,0.08))",color:"#7aa2f7",fontSize:14,fontWeight:600,marginBottom:12,
       display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <span>✈️ Flight Details</span><span style={{transform:sf?"rotate(180deg)":"",transition:"0.2s"}}>▼</span></button>
-    {sf&&<div><FlightCard f={FLIGHTS.outbound} label="Outbound — Feb 19"/><FlightCard f={FLIGHTS.return} label="Return — Feb 27"/></div>}
+    {sf&&<div><FlightCard f={FLIGHTS.outbound} label="Outbound – Feb 19"/><FlightCard f={FLIGHTS.return} label="Return – Feb 27"/></div>}
     <button onClick={()=>setSh(!sh)} style={{width:"100%",padding:"12px 14px",borderRadius:12,border:"none",cursor:"pointer",
       background:"linear-gradient(135deg, rgba(247,118,142,0.1), rgba(224,175,104,0.08))",color:"#f7768e",fontSize:14,fontWeight:600,marginBottom:12,
       display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -438,25 +412,19 @@ For general questions, just answer helpfully. Keep responses under 160 words.`};
 
   return(<div style={{padding:"12px 16px 100px"}}>
     <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>📅 Daily Planner</h2>
-
-    {/* Day tabs */}
     <div style={{display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
       {dailyPlans.map((p,i)=>(<button key={i} onClick={()=>{setDi(i);setAiOpen(false);setAiResponse(null);setPendingPlan(null);}} style={{padding:"6px 12px",borderRadius:10,border:"none",cursor:"pointer",
         background:di===i?"rgba(247,118,142,0.2)":"rgba(255,255,255,0.04)",color:di===i?"#f7768e":"#7982a9",fontSize:11,fontWeight:600,whiteSpace:"nowrap",flexShrink:0}}>
         {p.date.split(" ")[0]} {p.date.split(" ")[1]}</button>))}</div>
-
-    {/* Day header with AI button */}
     <div style={{background:"rgba(122,162,247,0.06)",borderRadius:12,padding:14,marginBottom:14,border:"1px solid rgba(122,162,247,0.12)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div><div style={{fontSize:15,fontWeight:600,color:"#c0caf5"}}>{d.title}</div>
         <div style={{fontSize:12,color:"#7aa2f7",marginTop:2}}>{d.date} • {d.city}</div></div>
       <button onClick={()=>setAiOpen(!aiOpen)} style={{padding:"7px 13px",borderRadius:9,border:"1px solid rgba(187,154,247,0.25)",
         background:aiOpen?"rgba(187,154,247,0.2)":"rgba(187,154,247,0.08)",color:"#bb9af7",fontSize:12,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>
         ✨ AI Replan</button></div>
-
-    {/* AI Panel */}
     {aiOpen&&(<div style={{background:"rgba(187,154,247,0.05)",borderRadius:12,padding:14,marginBottom:14,border:"1px solid rgba(187,154,247,0.18)"}}>
       <div style={{fontSize:12,color:"#bb9af7",fontWeight:600,marginBottom:6}}>✨ AI Day Planner</div>
-      <div style={{fontSize:11,color:"#7982a9",marginBottom:10,lineHeight:1.5}}>Tell me how to change this day — swap places, add food stops, adjust for energy level, anything.</div>
+      <div style={{fontSize:11,color:"#7982a9",marginBottom:10,lineHeight:1.5}}>Tell me how to change this day – swap places, add food stops, adjust for energy level, anything.</div>
       <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>
         {QUICK_PROMPTS.map((q,i)=>(<button key={i} onClick={()=>setAiInput(q)} style={{padding:"4px 10px",borderRadius:16,
           border:"1px solid rgba(187,154,247,0.2)",background:"rgba(187,154,247,0.06)",color:"#bb9af7",fontSize:10,cursor:"pointer"}}>{q}</button>))}</div>
@@ -466,7 +434,6 @@ For general questions, just answer helpfully. Keep responses under 160 words.`};
           style={{flex:1,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(187,154,247,0.2)",background:"rgba(0,0,0,0.3)",color:"#c0caf5",fontSize:13,outline:"none"}}/>
         <button onClick={askAI} disabled={aiLoading} style={{padding:"0 16px",borderRadius:10,border:"none",cursor:"pointer",
           background:"rgba(187,154,247,0.2)",color:"#bb9af7",fontSize:15,fontWeight:700}}>{aiLoading?"⏳":"→"}</button></div>
-
       {aiResponse&&(<div style={{marginTop:12,padding:12,background:"rgba(0,0,0,0.25)",borderRadius:10,border:"1px solid rgba(255,255,255,0.06)"}}>
         <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{aiResponse}</div>
         {pendingPlan&&(<div style={{marginTop:12}}>
@@ -479,8 +446,6 @@ For general questions, just answer helpfully. Keep responses under 160 words.`};
           <button onClick={applyPlan} style={{marginTop:10,width:"100%",padding:"10px",borderRadius:10,border:"none",cursor:"pointer",
             background:"linear-gradient(135deg,rgba(187,154,247,0.3),rgba(122,162,247,0.2))",color:"#bb9af7",fontSize:13,fontWeight:700}}>
             ✅ Apply This Plan</button></div>)}</div>)}</div>)}
-
-    {/* Timeline */}
     {d.stops.map((s,i)=>(<div key={i} style={{display:"flex",gap:10,marginBottom:4}}>
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:45,flexShrink:0}}>
         <div style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",fontWeight:600}}>{s.time}</div>
@@ -497,11 +462,12 @@ function TranslateTab(){
   const doTranslate=async(text)=>{if(!text.trim())return;setLoading(true);
     try{
       const raw=await callOpenAI([
-        {role:"system",content:'You are a Japanese-English translator for a tourist. Translate the given text. If English→Japanese, if Japanese→English. Return ONLY JSON: {"original","translated","romanji","context"}. No markdown.'},
+        {role:"system",content:'You are a Japanese-English translator for a tourist. Translate the given text. If English→Japanese, if Japanese→English. Return ONLY JSON: {"original":"...","translated":"...","romanji":"...","context":"..."}. No markdown, no extra text.'},
         {role:"user",content:text}
       ]);
       const clean=raw.replace(/```json|```/g,"").trim();
-      setResult(JSON.parse(clean));
+      const jsonMatch=clean.match(/\{[\s\S]*\}/);
+      setResult(jsonMatch?JSON.parse(jsonMatch[0]):{original:text,translated:clean,romanji:"",context:""});
     }catch{setResult({original:text,translated:"Translation error",romanji:"",context:""});}setLoading(false);};
   const startListen=useCallback(()=>{
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
@@ -512,13 +478,13 @@ function TranslateTab(){
   const filtered=pf==="all"?PHRASES:PHRASES.filter(p=>p.cat===pf);
   return(<div style={{padding:"12px 16px 100px"}}>
     <div style={{background:"rgba(247,118,142,0.06)",borderRadius:14,padding:16,marginBottom:16,border:"1px solid rgba(247,118,142,0.12)"}}>
-      <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🎙️ AI Translation (OpenAI)</div>
+      <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🎙️ AI Translation</div>
       <div style={{display:"flex",gap:8}}>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doTranslate(input)}
           placeholder="Type English or Japanese..." style={{flex:1,padding:"10px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(0,0,0,0.3)",color:"#c0caf5",fontSize:14,outline:"none"}}/>
         <button onClick={startListen} style={{width:44,height:44,borderRadius:"50%",border:"none",cursor:"pointer",
-          background:listening?"#f7768e":"rgba(122,162,247,0.2)",color:"#fff",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",
-          animation:listening?"pulse 1s infinite":"none"}}>{listening?"⏹":"🎤"}</button>
+          background:listening?"#f7768e":"rgba(122,162,247,0.2)",color:"#fff",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {listening?"⏹":"🎤"}</button>
         <button onClick={()=>doTranslate(input)} style={{padding:"0 16px",borderRadius:10,border:"none",cursor:"pointer",
           background:"rgba(122,162,247,0.2)",color:"#7aa2f7",fontSize:13,fontWeight:600}}>{loading?"...":"→"}</button></div>
       {result&&(<div style={{marginTop:12,padding:12,background:"rgba(0,0,0,0.2)",borderRadius:10}}>
@@ -539,30 +505,56 @@ function TranslateTab(){
         <span style={{fontSize:18,opacity:0.5}}>🔊</span></button>))}</div>
   </div>);}
 
-// ━━━ CAMERA TRANSLATOR (Google Lens-like) ━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── CAMERA TRANSLATOR ────────────────────────────────────────────────────────
 function CameraTab(){
   const videoRef=useRef(null);const canvasRef=useRef(null);
   const [streaming,setStreaming]=useState(false);const [result,setResult]=useState(null);
-  const [loading,setLoading]=useState(false);const [mode,setMode]=useState("camera"); // camera | upload
-  const [preview,setPreview]=useState(null);
+  const [loading,setLoading]=useState(false);const [mode,setMode]=useState("camera");
+  const [preview,setPreview]=useState(null);const [errMsg,setErrMsg]=useState(null);
 
   const startCamera=async()=>{
+    setErrMsg(null);
     try{
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}});
       if(videoRef.current){videoRef.current.srcObject=stream;videoRef.current.play();setStreaming(true);}
-    }catch{alert("Camera access denied. Use upload mode instead.");setMode("upload");}
+    }catch{setErrMsg("Camera access denied. Use Upload mode instead.");setMode("upload");}
   };
   const stopCamera=()=>{if(videoRef.current?.srcObject){videoRef.current.srcObject.getTracks().forEach(t=>t.stop());setStreaming(false);}};
+  useEffect(()=>{if(mode==="camera")startCamera();else stopCamera();return()=>stopCamera();},[mode]);
 
-  useEffect(()=>{if(mode==="camera")startCamera();return()=>stopCamera();},[mode]);
+  const translateImage=async(base64)=>{
+    setLoading(true);setResult(null);setErrMsg(null);
+    try{
+      const raw=await callVision(base64,
+        `You are a Japanese-to-English translator helping a tourist in Japan.
+Look at this image carefully. Find ALL Japanese text (kanji, hiragana, katakana, mixed).
+
+Return ONLY valid JSON in this exact format, no markdown, no extra text:
+{"items":[{"japanese":"...","romaji":"...","english":"...","context":"..."}],"summary":"..."}
+
+If you see NO Japanese text, return: {"items":[],"summary":"No Japanese text found in this image"}
+Do NOT return anything except the JSON object.`
+      );
+      if(!raw){setResult({items:[],summary:"Could not connect to AI. Check your internet connection."});setLoading(false);return;}
+      let parsed=null;
+      const jsonMatch=raw.match(/\{[\s\S]*\}/);
+      if(jsonMatch){try{parsed=JSON.parse(jsonMatch[0]);}catch{}}
+      if(parsed){setResult(parsed);}
+      else{setResult({items:[],summary:raw.length>200?raw.slice(0,200)+"…":raw});}
+    }catch(err){setResult({items:[],summary:`Error: ${err.message}`});}
+    setLoading(false);
+  };
 
   const captureAndTranslate=async()=>{
     if(!videoRef.current||!canvasRef.current)return;
     const v=videoRef.current;const c=canvasRef.current;
+    if(!v.videoWidth||!v.videoHeight){setErrMsg("Camera not ready yet. Wait a moment and try again.");return;}
     c.width=v.videoWidth;c.height=v.videoHeight;
     c.getContext("2d").drawImage(v,0,0);
-    const base64=c.toDataURL("image/jpeg",0.8).split(",")[1];
-    setPreview(c.toDataURL("image/jpeg",0.8));
+    const dataUrl=c.toDataURL("image/jpeg",0.95);
+    const base64=dataUrl.split(",")[1];
+    if(!base64||base64.length<100){setErrMsg("Could not capture image. Make sure camera is active.");return;}
+    setPreview(dataUrl);
     await translateImage(base64);
   };
 
@@ -570,42 +562,21 @@ function CameraTab(){
     const file=e.target.files?.[0];if(!file)return;
     const reader=new FileReader();
     reader.onload=async(ev)=>{
-      const dataUrl=ev.target.result;
-      setPreview(dataUrl);
+      const dataUrl=ev.target.result;setPreview(dataUrl);
       const base64=dataUrl.split(",")[1];
       await translateImage(base64);
     };
     reader.readAsDataURL(file);
   };
 
-  const translateImage=async(base64)=>{
-    setLoading(true);setResult(null);
-    try{
-      const text=await callVision(base64,
-        `You are a Japanese-to-English translator helping a tourist in Japan. Look at this image and:
-1. Identify ALL Japanese text visible (signs, menus, labels, etc.)
-2. For each text found, provide the Japanese, romaji, and English translation
-3. If it's a menu, translate all items with approximate prices if visible
-4. Add brief context tips (e.g. "this is a train station exit sign")
-
-Format as JSON: {"items":[{"japanese":"...","romaji":"...","english":"...","context":"..."}],"summary":"brief description of what you see"}
-Return ONLY JSON, no markdown.`
-      );
-      const clean=text.replace(/```json|```/g,"").trim();
-      setResult(JSON.parse(clean));
-    }catch(err){
-      setResult({items:[],summary:"Could not translate. Try again with a clearer image."});
-    }
-    setLoading(false);
-  };
-
   return(<div style={{padding:"12px 16px 100px"}}>
     <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400,marginBottom:12}}>📷 Camera Translator</h2>
     <div style={{display:"flex",gap:6,marginBottom:12}}>
-      {["camera","upload"].map(m=>(<button key={m} onClick={()=>{setMode(m);setResult(null);setPreview(null);}} style={{flex:1,padding:"8px",borderRadius:10,border:"none",cursor:"pointer",
+      {["camera","upload"].map(m=>(<button key={m} onClick={()=>{setMode(m);setResult(null);setPreview(null);setErrMsg(null);}} style={{flex:1,padding:"8px",borderRadius:10,border:"none",cursor:"pointer",
         background:mode===m?"rgba(247,118,142,0.2)":"rgba(255,255,255,0.04)",color:mode===m?"#f7768e":"#7982a9",fontSize:12,fontWeight:600}}>
-        {m==="camera"?"📷 Live Camera":"📁 Upload Photo"}</button>))}
-    </div>
+        {m==="camera"?"📷 Live Camera":"📁 Upload Photo"}</button>))}</div>
+
+    {errMsg&&<div style={{marginBottom:12,padding:10,borderRadius:8,background:"rgba(247,118,142,0.1)",border:"1px solid rgba(247,118,142,0.2)",color:"#f7768e",fontSize:12}}>{errMsg}</div>}
 
     {mode==="camera"&&(<div style={{position:"relative",borderRadius:14,overflow:"hidden",marginBottom:12,background:"#000",aspectRatio:"4/3"}}>
       <video ref={videoRef} style={{width:"100%",height:"100%",objectFit:"cover"}} playsInline muted/>
@@ -617,7 +588,7 @@ Return ONLY JSON, no markdown.`
           display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,color:"#fff",
           backdropFilter:"blur(4px)"}}>
         {loading?"⏳":"📸"}</button>
-      {!streaming&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#7982a9",fontSize:13}}>Starting camera...</div>}
+      {!streaming&&!errMsg&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#7982a9",fontSize:13}}>Starting camera…</div>}
     </div>)}
 
     {mode==="upload"&&(<div style={{marginBottom:12}}>
@@ -635,8 +606,7 @@ Return ONLY JSON, no markdown.`
     </div>)}
 
     {loading&&(<div style={{textAlign:"center",padding:20,color:"#7aa2f7",fontSize:13}}>
-      <div style={{fontSize:30,marginBottom:8,animation:"pulse 1s infinite"}}>🔍</div>
-      Analyzing image with AI...</div>)}
+      <div style={{fontSize:30,marginBottom:8}}>🔍</div>Analyzing image with AI…</div>)}
 
     {result&&(<div style={{background:"rgba(0,0,0,0.2)",borderRadius:14,padding:16,border:"1px solid rgba(255,255,255,0.08)"}}>
       {result.summary&&<div style={{fontSize:12,color:"#e0af68",marginBottom:12,padding:"8px 10px",background:"rgba(224,175,104,0.08)",borderRadius:8}}>📝 {result.summary}</div>}
@@ -648,21 +618,20 @@ Return ONLY JSON, no markdown.`
           {item.context&&<div style={{fontSize:11,color:"#7982a9",marginTop:2}}>{item.context}</div>}
           <button onClick={()=>speak(item.japanese)} style={{marginTop:6,padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",background:"rgba(158,206,106,0.1)",color:"#9ece6a",fontSize:11}}>🔊 Listen</button>
         </div>))}
-      </div>):(!loading&&<div style={{textAlign:"center",color:"#565f89",fontSize:13}}>No Japanese text detected</div>)}
+      </div>):(!loading&&<div style={{textAlign:"center",color:"#565f89",fontSize:13,padding:12}}>No Japanese text detected in this image.</div>)}
     </div>)}
 
     <div style={{marginTop:16,padding:14,borderRadius:12,background:"rgba(224,175,104,0.06)",border:"1px solid rgba(224,175,104,0.12)"}}>
       <div style={{fontSize:12,color:"#e0af68",fontWeight:600,marginBottom:6}}>💡 Tips for best results</div>
-      <div style={{fontSize:11,color:"#9aa5ce",lineHeight:1.6}}>
+      <div style={{fontSize:11,color:"#9aa5ce",lineHeight:1.8}}>
         • Hold camera steady and close to text<br/>
         • Good lighting helps a lot<br/>
         • Works great on: menus, signs, train schedules, labels<br/>
         • Upload mode works for saved photos too</div>
     </div>
-  </div>);
-}
+  </div>);}
 
-// ━━━ EXPLORE TAB (with ATM Finder + more Konbini) ━━━━━━━━━━━━━━━━
+// ─── EXPLORE TAB ──────────────────────────────────────────────────────────────
 function CurrencyConverter(){
   const [a,setA]=useState("1000");const [d,setD]=useState("jpy");
   const r=0.0067;const c=d==="jpy"?(parseFloat(a||0)*r).toFixed(2):(parseFloat(a||0)/r).toFixed(0);
@@ -685,10 +654,9 @@ function ExploreTab(){
   const [loc,setLoc]=useState(null);
   const getLoc=()=>{navigator.geolocation?.getCurrentPosition(p=>setLoc({lat:p.coords.latitude,lng:p.coords.longitude}),()=>{},{enableHighAccuracy:true});};
   const openM=q=>{const u=loc?`https://www.google.com/maps/search/${encodeURIComponent(q)}/@${loc.lat},${loc.lng},15z`:`https://www.google.com/maps/search/${encodeURIComponent(q)}`;window.open(u,"_blank");};
-
   const konbini=[
-    {i:"🏪",l:"7-Eleven",q:"7-Eleven near me",c:"#e63946"},{i:"🔵",l:"Lawson",q:"Lawson near me",c:"#457b9d"},
-    {i:"🟢",l:"FamilyMart",q:"FamilyMart near me",c:"#2a9d8f"},{i:"🟡",l:"Ministop",q:"Ministop near me",c:"#e9c46a"}];
+    {i:"🏪",l:"7-Eleven",q:"7-Eleven near me"},{i:"🔵",l:"Lawson",q:"Lawson near me"},
+    {i:"🟢",l:"FamilyMart",q:"FamilyMart near me"},{i:"🟡",l:"Ministop",q:"Ministop near me"}];
   const atmSpots=[
     {i:"🏧",l:"7-Eleven ATM",q:"7-Eleven ATM near me",note:"Most reliable for foreign cards. 24/7."},
     {i:"🏧",l:"Japan Post ATM",q:"Japan Post ATM near me",note:"Works with Visa/MC. Business hours."},
@@ -700,25 +668,17 @@ function ExploreTab(){
     {i:"🍣",l:"Sushi",q:"sushi near me"},{i:"💊",l:"Pharmacy",q:"pharmacy near me"},
     {i:"☕",l:"Café",q:"cafe near me"},{i:"🍺",l:"Izakaya",q:"izakaya near me"},
     {i:"🪩",l:"Donki",q:"Don Quijote near me"},{i:"🚻",l:"Toilet",q:"public toilet near me"}];
-
   return(<div style={{padding:"12px 16px 100px"}}>
     <CurrencyConverter/>
-
-    {/* Location */}
     <div style={{background:"rgba(122,162,247,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(122,162,247,0.12)"}}>
       <button onClick={getLoc} style={{width:"100%",padding:"10px",borderRadius:10,border:"none",cursor:"pointer",
         background:"rgba(122,162,247,0.15)",color:"#7aa2f7",fontSize:13,fontWeight:600}}>
         {loc?`📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`:"📍 Enable Location"}</button></div>
-
-    {/* Konbini Finder */}
     <div style={{fontSize:13,color:"#9ece6a",fontWeight:600,marginBottom:8}}>🏪 Convenience Stores</div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(2, 1fr)",gap:8,marginBottom:16}}>
       {konbini.map((s,i)=>(<button key={i} onClick={()=>openM(s.q)} style={{padding:"14px 10px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",
         background:"rgba(255,255,255,0.03)",cursor:"pointer",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:600}}>{s.l}</span></button>))}
-    </div>
-
-    {/* ATM Finder */}
+        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:600}}>{s.l}</span></button>))}</div>
     <div style={{background:"rgba(187,154,247,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(187,154,247,0.12)"}}>
       <div style={{fontSize:13,color:"#bb9af7",fontWeight:600,marginBottom:10}}>🏧 ATM Finder (Foreign Cards)</div>
       <div style={{fontSize:11,color:"#9aa5ce",marginBottom:10}}>Japan is cash-heavy! These ATMs accept international Visa/Mastercard:</div>
@@ -729,10 +689,7 @@ function ExploreTab(){
           <div style={{fontSize:10,color:"#7982a9"}}>{a.note}</div></div>
         <span style={{color:"#bb9af7",fontSize:12}}>→</span></button>))}
       <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"rgba(224,175,104,0.08)",fontSize:11,color:"#e0af68"}}>
-        💡 7-Eleven ATMs are the most reliable for foreign cards. Available 24/7 nationwide!</div>
-    </div>
-
-    {/* Trash tips (compact) */}
+        💡 7-Eleven ATMs are the most reliable for foreign cards. Available 24/7 nationwide!</div></div>
     <div style={{background:"rgba(158,206,106,0.06)",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(158,206,106,0.1)"}}>
       <div style={{fontSize:13,color:"#9ece6a",fontWeight:600,marginBottom:6}}>🗑️ Where to find trash cans</div>
       <div style={{fontSize:11,color:"#9aa5ce",lineHeight:1.8}}>
@@ -742,18 +699,13 @@ function ExploreTab(){
         🎒 Pro tip: carry a small bag for trash!</div>
       <button onClick={()=>openM("convenience store near me")} style={{width:"100%",marginTop:8,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",
         background:"rgba(158,206,106,0.15)",color:"#9ece6a",fontSize:12,fontWeight:600}}>🗑️ Find Nearest Konbini →</button></div>
-
-    {/* Quick search */}
     <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🔍 Find Nearby</div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(2, 1fr)",gap:8,marginBottom:20}}>
       {qs.map((s,i)=>(<button key={i} onClick={()=>openM(s.q)} style={{padding:"14px 10px",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)",
         background:"rgba(255,255,255,0.03)",cursor:"pointer",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:500}}>{s.l}</span></button>))}
-    </div>
-
-    {/* Taxi & Transit */}
+        <span style={{fontSize:26}}>{s.i}</span><span style={{fontSize:12,color:"#c0caf5",fontWeight:500}}>{s.l}</span></button>))}</div>
     <div style={{fontSize:13,color:"#9aa5ce",marginBottom:10}}>🚖 Taxi & Transit</div>
-    {[{n:"GO Taxi",d:"Most popular",u:"https://go.goinc.jp/"},{n:"Tokyo Metro Map",d:"Subway map",u:"https://www.tokyometro.jp/en/subwaymap/"},{n:"Google Maps Transit",d:"All routes",u:"https://www.google.com/maps/@35.68,139.65,12z"}]
+    {[{n:"GO Taxi",d:"Most popular taxi app",u:"https://go.goinc.jp/"},{n:"Tokyo Metro Map",d:"Subway map",u:"https://www.tokyometro.jp/en/subwaymap/"},{n:"Google Maps Transit",d:"All routes",u:"https://www.google.com/maps/@35.68,139.65,12z"}]
       .map((t,i)=>(<a key={i} href={t.u} target="_blank" rel="noopener" style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderRadius:10,marginBottom:6,
         border:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.03)",textDecoration:"none"}}>
         <div><div style={{fontSize:13,color:"#c0caf5",fontWeight:600}}>{t.n}</div><div style={{fontSize:11,color:"#7982a9"}}>{t.d}</div></div>
@@ -830,7 +782,7 @@ function PackTab(){
         cursor:"pointer",textAlign:"left",width:"100%",opacity:ch[item.id]?0.6:1,marginBottom:4}}>
         <div style={{width:22,height:22,borderRadius:6,flexShrink:0,border:ch[item.id]?"2px solid #9ece6a":"2px solid rgba(255,255,255,0.15)",
           background:ch[item.id]?"rgba(158,206,106,0.2)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#9ece6a"}}>
-          {ch[item.id]?"✔":""}</div>
+          {ch[item.id]?"✓":""}</div>
         <div style={{flex:1}}><div style={{fontSize:13,color:"#c0caf5",fontWeight:500,textDecoration:ch[item.id]?"line-through":"none"}}>{item.name}</div>
           <div style={{fontSize:11,color:"#7982a9"}}>{item.note}</div></div></button>))}</div>))}
     <button onClick={()=>setCh({})} style={{width:"100%",padding:"10px",borderRadius:10,border:"1px solid rgba(247,118,142,0.15)",
@@ -860,7 +812,7 @@ function ExpenseTab(){
       <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
         {Object.entries(ci).map(([k,v])=>(<button key={k} onClick={()=>setNe(p=>({...p,c:k}))} style={{padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",
           background:ne.c===k?"rgba(247,118,142,0.2)":"rgba(255,255,255,0.05)",color:ne.c===k?"#f7768e":"#7982a9",fontSize:11}}>{v} {k}</button>))}</div>
-      <button onClick={add} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",cursor:"pointer",background:"rgba(158,206,106,0.2)",color:"#9ece6a",fontSize:13,fontWeight:600}}>✔ Save</button></div>)}
+      <button onClick={add} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",cursor:"pointer",background:"rgba(158,206,106,0.2)",color:"#9ece6a",fontSize:13,fontWeight:600}}>✓ Save</button></div>)}
     {[...ex].reverse().map(e=>(<div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,marginBottom:6,
       border:"1px solid rgba(255,255,255,0.05)",background:"rgba(255,255,255,0.02)"}}>
       <span style={{fontSize:20}}>{ci[e.c]||"📦"}</span><div style={{flex:1}}><div style={{fontSize:13,color:"#c0caf5"}}>{e.n}</div>
@@ -871,27 +823,24 @@ function ExpenseTab(){
     {ex.length===0&&<div style={{textAlign:"center",padding:30,color:"#565f89",fontSize:13}}>No expenses yet</div>}
   </div>);}
 
-// ━━━ AI ASSISTANT TAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── AI CHAT TAB ──────────────────────────────────────────────────────────────
 function ChatTab({dailyPlans,setDailyPlans,expenses}){
   const WELCOME=`こんにちは！ I'm your Japan AI travel assistant 🇯🇵
 
 I know your full itinerary, hotels, budget, and interests. Ask me anything:
-• "Replan Feb 24 — I'm exhausted"
+• "Replan Feb 24 – I'm exhausted"
 • "Best ramen near Asakusa under ¥1,500?"
 • "How do I say 'table for two' in Japanese?"
 • "Is teamLab worth ¥3,800?"
 • "What should I do tonight in Tokyo?"`;
   const [msgs,setMsgs]=useState([{role:"assistant",content:WELCOME}]);
-  const [input,setInput]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [pendingPlan,setPendingPlan]=useState(null);
-  const endRef=useRef(null);
-
+  const [input,setInput]=useState("");const [loading,setLoading]=useState(false);
+  const [pendingPlan,setPendingPlan]=useState(null);const endRef=useRef(null);
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[msgs,pendingPlan]);
 
   const QUICK_Q=[
     {label:"🍜 Ramen near hotel",q:"What's the best ramen near my hotel right now?"},
-    {label:"🔄 Replan a day",q:"I'm tired on Feb 25 — can you make it more relaxed?"},
+    {label:"🔄 Replan a day",q:"I'm tired on Feb 25 – can you make it more relaxed?"},
     {label:"🚇 Subway help",q:"How do I get from Asakusa to Shibuya on the subway?"},
     {label:"🥃 Whiskey bar tonight",q:"Which whiskey bar should I hit tonight in Tokyo?"},
     {label:"💴 Save money",q:"What are the best budget meals near Asakusa?"},
@@ -908,20 +857,11 @@ I know your full itinerary, hotels, budget, and interests. Ask me anything:
       const sysMsg={role:"system",content:buildSystemPrompt(dailyPlans,expenses||[])};
       const history=msgs.slice(-10).map(m=>({role:m.role,content:m.content}));
       const text=await callChat([sysMsg,...history,{role:"user",content:userMsg}],{max_tokens:700});
-
-      // Extract JSON replan if present
       const jsonMatch=text?.match(/```json\n([\s\S]*?)\n```/);
-      if(jsonMatch){
-        try{
-          const parsed=JSON.parse(jsonMatch[1]);
-          if(parsed.action==="replan")setPendingPlan(parsed);
-        }catch{}
-      }
+      if(jsonMatch){try{const p=JSON.parse(jsonMatch[1]);if(p.action==="replan")setPendingPlan(p);}catch{}}
       const cleanText=text?.replace(/```json[\s\S]*?```/g,"").trim();
       setMsgs(p=>[...p,{role:"assistant",content:cleanText||"Sorry, couldn't respond. Try again."}]);
-    }catch{
-      setMsgs(p=>[...p,{role:"assistant",content:"Connection error. Check your internet."}]);
-    }
+    }catch{setMsgs(p=>[...p,{role:"assistant",content:"Connection error. Check your internet."}]);}
     setLoading(false);
   };
 
@@ -936,17 +876,11 @@ I know your full itinerary, hotels, budget, and interests. Ask me anything:
     setPendingPlan(null);
   };
 
-  const isUser=role=>role==="user";
-
   return(<div style={{padding:"12px 16px 100px",display:"flex",flexDirection:"column",height:"calc(100vh - 140px)"}}>
-    {/* Header */}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <h2 style={{fontSize:16,color:"#9aa5ce",fontWeight:400}}>🤖 Japan AI Assistant</h2>
       {msgs.length>1&&<button onClick={()=>{setMsgs([{role:"assistant",content:WELCOME}]);setPendingPlan(null);}}
-        style={{padding:"4px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",
-          color:"#565f89",fontSize:11,cursor:"pointer"}}>↺ Reset</button>}</div>
-
-    {/* Quick questions (shown only at start) */}
+        style={{padding:"4px 10px",borderRadius:8,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",color:"#565f89",fontSize:11,cursor:"pointer"}}>↺ Reset</button>}</div>
     {msgs.length<=1&&(<div style={{marginBottom:14}}>
       <div style={{fontSize:11,color:"#565f89",marginBottom:8}}>Try asking:</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -954,25 +888,20 @@ I know your full itinerary, hotels, budget, and interests. Ask me anything:
           style={{padding:"7px 13px",borderRadius:20,border:"1px solid rgba(122,162,247,0.15)",
             background:"rgba(122,162,247,0.06)",color:"#7aa2f7",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>
           {q.label}</button>))}</div></div>)}
-
-    {/* Messages */}
     <div style={{flex:1,overflowY:"auto",marginBottom:12,display:"flex",flexDirection:"column",gap:8}}>
-      {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:isUser(m.role)?"flex-end":"flex-start"}}>
+      {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
         <div style={{maxWidth:"88%",padding:"10px 14px",
-          borderRadius:isUser(m.role)?"14px 14px 4px 14px":"14px 14px 14px 4px",
-          background:isUser(m.role)?"rgba(122,162,247,0.15)":"rgba(255,255,255,0.04)",
-          border:`1px solid ${isUser(m.role)?"rgba(122,162,247,0.2)":"rgba(255,255,255,0.06)"}`,
-          fontSize:13,color:isUser(m.role)?"#c0caf5":"#9aa5ce",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
+          borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
+          background:m.role==="user"?"rgba(122,162,247,0.15)":"rgba(255,255,255,0.04)",
+          border:`1px solid ${m.role==="user"?"rgba(122,162,247,0.2)":"rgba(255,255,255,0.06)"}`,
+          fontSize:13,color:m.role==="user"?"#c0caf5":"#9aa5ce",lineHeight:1.65,whiteSpace:"pre-wrap"}}>
           {m.content}</div></div>))}
-
-      {/* Pending replan card */}
       {pendingPlan&&!loading&&(
         <div style={{maxWidth:"88%",padding:14,borderRadius:12,background:"rgba(187,154,247,0.07)",border:"1px solid rgba(187,154,247,0.22)"}}>
           <div style={{fontSize:12,color:"#bb9af7",fontWeight:700,marginBottom:10}}>
             ✨ Suggested: "{pendingPlan.dayTitle}"
             {pendingPlan.dayIndex>=0&&pendingPlan.dayIndex<dailyPlans.length&&
-              <span style={{fontWeight:400,color:"#9aa5ce"}}> · {dailyPlans[pendingPlan.dayIndex]?.date}</span>}
-          </div>
+              <span style={{fontWeight:400,color:"#9aa5ce"}}> · {dailyPlans[pendingPlan.dayIndex]?.date}</span>}</div>
           {pendingPlan.stops?.map((s,i)=>(<div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:6,padding:"6px 8px",borderRadius:7,background:"rgba(187,154,247,0.07)"}}>
             <span style={{fontSize:10,color:"#7aa2f7",fontFamily:"monospace",width:42,flexShrink:0,paddingTop:1}}>{s.time}</span>
             <span style={{fontSize:15,flexShrink:0}}>{s.icon}</span>
@@ -984,21 +913,13 @@ I know your full itinerary, hotels, budget, and interests. Ask me anything:
                 background:"rgba(187,154,247,0.25)",color:"#bb9af7",fontSize:12,fontWeight:700}}>
                 ✅ Apply to Planner</button>)}
             <button onClick={()=>setPendingPlan(null)} style={{padding:"9px 14px",borderRadius:9,border:"1px solid rgba(255,255,255,0.08)",
-              background:"transparent",color:"#565f89",fontSize:12,cursor:"pointer"}}>Dismiss</button>
-          </div></div>)}
-
+              background:"transparent",color:"#565f89",fontSize:12,cursor:"pointer"}}>Dismiss</button></div></div>)}
       {loading&&(<div style={{display:"flex",justifyContent:"flex-start"}}>
-        <div style={{padding:"10px 16px",borderRadius:"14px 14px 14px 4px",background:"rgba(255,255,255,0.04)",fontSize:13,color:"#565f89",display:"flex",gap:6,alignItems:"center"}}>
-          <span style={{animation:"pulse 1s infinite",display:"inline-block"}}>●</span>
-          <span style={{animation:"pulse 1s infinite 0.2s",display:"inline-block"}}>●</span>
-          <span style={{animation:"pulse 1s infinite 0.4s",display:"inline-block"}}>●</span>
-        </div></div>)}
+        <div style={{padding:"10px 16px",borderRadius:"14px 14px 14px 4px",background:"rgba(255,255,255,0.04)",fontSize:20,color:"#565f89",letterSpacing:4}}>•••</div></div>)}
       <div ref={endRef}/></div>
-
-    {/* Input */}
     <div style={{display:"flex",gap:8,position:"sticky",bottom:70}}>
       <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()}
-        placeholder="Ask anything — replan days, food, phrases, transit..."
+        placeholder="Ask anything – replan days, food, phrases, transit..."
         style={{flex:1,padding:"12px 14px",borderRadius:12,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(0,0,0,0.35)",color:"#c0caf5",fontSize:14,outline:"none"}}/>
       <button onClick={()=>send()} disabled={loading} style={{padding:"0 20px",borderRadius:12,border:"none",cursor:"pointer",
@@ -1029,24 +950,24 @@ function SOSTab(){return(<div style={{padding:"12px 16px 100px"}}>
   <div style={{marginTop:16,padding:14,borderRadius:12,background:"rgba(224,175,104,0.06)",border:"1px solid rgba(224,175,104,0.12)"}}>
     <div style={{fontSize:13,color:"#e0af68",fontWeight:600,marginBottom:8}}>📋 Good to Know</div>
     <div style={{fontSize:12,color:"#9aa5ce",lineHeight:1.8}}>
-      • Japan is extremely safe<br/>• Police boxes (交番 kōban) everywhere — help with directions too<br/>
-      • Keep passport photo + hotel address on phone<br/>• Hotel front desk helps with emergencies</div></div></div>);}
+      • Japan is extremely safe<br/>• Police boxes (交番 kōban) everywhere – help with directions too<br/>
+      • Keep passport photo + hotel address on phone<br/>• Hotel front desk helps with emergencies</div></div>
+</div>);}
 
-// ━━━ MAIN APP ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function JapanTravelAssistant(){
   const [tab,setTab]=useState("trip");
   const [dailyPlans,setDailyPlans]=useState(DAILY_PLANS);
   const [expenses,setExpenses]=useState([]);
-
-  // Keep expenses in sync for AI budget context
   useEffect(()=>{storage.get("japan-expenses").then(d=>{if(d)setExpenses(d);});},[tab]);
-
   return(<div style={{minHeight:"100vh",background:"#1a1a2e",color:"#c0caf5",fontFamily:"'Noto Sans JP', -apple-system, sans-serif",maxWidth:480,margin:"0 auto",position:"relative"}}>
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=Noto+Serif+JP:wght@400;600&display=swap');
-      @keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(247,118,142,0.4);}50%{transform:scale(1.05);box-shadow:0 0 0 12px rgba(247,118,142,0);}}
-      *{box-sizing:border-box;margin:0;padding:0;}::-webkit-scrollbar{width:0;}body{background:#1a1a2e;}
-      input::placeholder{color:#565f89;}button:active{opacity:0.8;}
+      *{box-sizing:border-box;margin:0;padding:0;}
+      ::-webkit-scrollbar{width:0;}
+      body{background:#1a1a2e;}
+      input::placeholder{color:#565f89;}
+      button:active{opacity:0.8;}
     `}</style>
     <Header/>
     {tab==="trip"&&<TripTab/>}
